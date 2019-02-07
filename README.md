@@ -3,12 +3,12 @@
 ## Contacts
 
 * Prof. Petros Koumoutsakos (Lecturer)
-* Dr. Sergio Martin (Lecturer)
-* Dr. Georgios Arampatzis (Head TA)
-* Dr. Jacopo Canton
-* Pantelis Vlachas
-* Ermioni Papadopoulou
-* Daniel Wälchli
+* Dr. Sergio Martin (Lecturer) - martiser@ethz.ch
+* Dr. Georgios Arampatzis (Head TA) - garampat@ethz.ch
+* Dr. Jacopo Canton - jcanton@ethz.ch
+* Pantelis Vlachas - pvlachas@ethz.ch
+* Ermioni Papadopoulou - permioni@ethz.ch
+* Daniel Wälchli - wadaniel@ethz.ch
 
 ## Lecture Webpage and Resources
 
@@ -18,7 +18,7 @@
 
 Please submit your exercise solutions via Moodle (nethz login required)
 
-[EXERCISE SUBMISSION](https://moodle-app2.let.ethz.ch/course/index.php?categoryid=342)
+[Exercise Submission](https://moodle-app2.let.ethz.ch/course/index.php?categoryid=342)
 
 ## Discussion Board
 
