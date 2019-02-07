@@ -2,18 +2,29 @@
 
 ## Contacts
 
-* Sergio (Teacher)
-* George (Head TA)
-* Jacopo
+* Prof. Petros Koumoutsakos (Lecturer)
+* Dr. Sergio Martin (Lecturer)
+* Dr. Georgios Arampatzis (Head TA)
+* Dr. Jacopo Canton
 * Pantelis
 * Ermioni
 * Daniel
+
+## Lecture Webpage and Resources
+
+[Course Webpage](http://www.cse-lab.ethz.ch/teaching/hpcse-ii_fs19/)
 
 ## Exercise Hand-in
 
 Please submit your exercise solutions via Moodle (nethz login required)
 
 [EXERCISE SUBMISSION](https://moodle-app2.let.ethz.ch/course/index.php?categoryid=342)
+
+## Discussion Board
+
+Please submit all your questions about the lectures, excercises, and project to our Piazza discussion board.
+
+[PIAZZA](https://piazza.com/class/jromqmagjbd30c)
 
 ## Lecture Schedule
 
