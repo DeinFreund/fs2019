@@ -6,9 +6,9 @@
 * Dr. Sergio Martin (Lecturer)
 * Dr. Georgios Arampatzis (Head TA)
 * Dr. Jacopo Canton
-* Pantelis
-* Ermioni
-* Daniel
+* Pantelis Vlachas
+* Ermioni Papadopoulou
+* Daniel Wälchli
 
 ## Lecture Webpage and Resources
 
