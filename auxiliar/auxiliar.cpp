@@ -43,16 +43,16 @@ int main(int argc, char** argv)
 
 	double totalMeasured = totalSmoothingTime + totalResidualTime + totalRestrictionTime + totalProlongTime + totalL2NormTime;
 
-	printf("   Time (s)    "); for (int i = 0; i < s.gridCount; i++) printf("Grid%d   ", i);                    printf("   Total  \n");
-	printf("-------------|-"); for (int i = 0; i < s.gridCount; i++) printf("--------"); printf("|---------\n");
-	printf("Smoothing    | "); for (int i = 0; i < s.gridCount; i++) printf("%2.3f   ", s.smoothingTime[i]);    printf("|  %2.3f  \n", totalSmoothingTime);
-	printf("Residual     | "); for (int i = 0; i < s.gridCount; i++) printf("%2.3f   ", s.residualTime[i]);     printf("|  %2.3f  \n", totalResidualTime);
-	printf("Restriction  | "); for (int i = 0; i < s.gridCount; i++) printf("%2.3f   ", s.restrictionTime[i]);  printf("|  %2.3f  \n", totalRestrictionTime);
-	printf("Prolongation | "); for (int i = 0; i < s.gridCount; i++) printf("%2.3f   ", s.prolongTime[i]);      printf("|  %2.3f  \n", totalProlongTime);
-	printf("L2Norm       | "); for (int i = 0; i < s.gridCount; i++) printf("%2.3f   ", s.L2NormTime[i]);       printf("|  %2.3f  \n", totalL2NormTime);
-	printf("-------------|-"); for (int i = 0; i < s.gridCount; i++) printf("--------"); printf("|---------\n");
-	printf("Total        | "); for (int i = 0; i < s.gridCount; i++) printf("%2.3f   ", timePerGrid[i]); printf("|  %2.3f  \n", totalMeasured);
-	printf("-------------|-"); for (int i = 0; i < s.gridCount; i++) printf("--------"); printf("|---------\n");
+	printf("   Time (s)    "); for (int i = 0; i < s.gridCount; i++) printf(" Grid%d   ", i);                    printf("    Total  \n");
+	printf("-------------|-"); for (int i = 0; i < s.gridCount; i++) printf("---------"); printf("|---------\n");
+	printf("Smoothing    | "); for (int i = 0; i < s.gridCount; i++) printf("%6.3f   ", s.smoothingTime[i]);    printf("|  %6.3f  \n", totalSmoothingTime);
+	printf("Residual     | "); for (int i = 0; i < s.gridCount; i++) printf("%6.3f   ", s.residualTime[i]);     printf("|  %6.3f  \n", totalResidualTime);
+	printf("Restriction  | "); for (int i = 0; i < s.gridCount; i++) printf("%6.3f   ", s.restrictionTime[i]);  printf("|  %6.3f  \n", totalRestrictionTime);
+	printf("Prolongation | "); for (int i = 0; i < s.gridCount; i++) printf("%6.3f   ", s.prolongTime[i]);      printf("|  %6.3f  \n", totalProlongTime);
+	printf("L2Norm       | "); for (int i = 0; i < s.gridCount; i++) printf("%6.3f   ", s.L2NormTime[i]);       printf("|  %6.3f  \n", totalL2NormTime);
+	printf("-------------|-"); for (int i = 0; i < s.gridCount; i++) printf("---------"); printf("|---------\n");
+	printf("Total        | "); for (int i = 0; i < s.gridCount; i++) printf("%6.3f   ", timePerGrid[i]); printf("|  %6.3f  \n", totalMeasured);
+	printf("-------------|-"); for (int i = 0; i < s.gridCount; i++) printf("---------"); printf("|---------\n");
 	printf("\n");
 	printf("Fine grid elements: %lu x %lu (n = %lu)\n", s.N, s.N, s.N0);
 	printf("V-Cycle Iterations: %d\n", s.iteration);
