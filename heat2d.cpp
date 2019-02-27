@@ -41,11 +41,27 @@ void heat2DSolver(Heat2DSetup& s)
   g[i].N = pow(2, s.N0-i) + 1;
   g[i].h = 1.0/(g[i].N-1);
 
+  if (true)
+    {
   //make arrays contiguous in memory
   g[i].U   = alloc2D<double>(g[i].N, g[i].N);
   g[i].Un  = alloc2D<double>(g[i].N, g[i].N);
   g[i].Res = alloc2D<double>(g[i].N, g[i].N);
   g[i].f   = alloc2D<double>(g[i].N, g[i].N);
+    }else
+  {
+    g[i].U   = (double**) calloc (sizeof(double*), g[i].N);
+  g[i].Un  = (double**) calloc (sizeof(double*), g[i].N);
+  g[i].Res = (double**) calloc (sizeof(double*), g[i].N);
+  g[i].f   = (double**) calloc (sizeof(double*), g[i].N);
+
+  for (int j = 0; j < g[i].N ; j++)
+  {
+   g[i].U[j]   = (double*) calloc (sizeof(double), g[i].N);
+   g[i].Un[j]  = (double*) calloc (sizeof(double), g[i].N);
+   g[i].Res[j] = (double*) calloc (sizeof(double), g[i].N);
+   g[i].f[j]   = (double*) calloc (sizeof(double), g[i].N);
+  }}
  }
 
  // Setting up problem.
