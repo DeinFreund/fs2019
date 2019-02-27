@@ -3,6 +3,9 @@
 #include <stdlib.h>
 #include "auxiliar/auxiliar.hpp"
 
+#include <iostream> //debugging
+using namespace std;
+
 class GridLevel
 {
 public:
@@ -14,10 +17,20 @@ public:
  double** Res; // Residual Grid
 };
 
+//helper to make allocations nicer
+template<typename T>
+T** alloc2D(size_t dim1, size_t dim2){
+  T** ret = (T**)malloc(sizeof(T*) * dim1 + sizeof(T) * dim1 * dim2);
+  T* start = (T*)(ret + dim1);
+  for (int i = 0; i < dim1; i++) ret[i] = start + i * dim2;
+  for (int i = 0; i < dim1; i++) for (int j = 0; j < dim2; j++) ret[i][j] = 0;
+  return ret;
+}
+
 void heat2DSolver(Heat2DSetup& s)
 {
  // Multigrid parameters -- Find the best configuration!
- s.setGridCount(1);     // Number of Multigrid levels to use
+ s.setGridCount(3);     // Number of Multigrid levels to use
  s.downRelaxations = 1; // Number of Relaxations before restriction
  s.upRelaxations   = 1;   // Number of Relaxations after prolongation
 
@@ -28,18 +41,11 @@ void heat2DSolver(Heat2DSetup& s)
   g[i].N = pow(2, s.N0-i) + 1;
   g[i].h = 1.0/(g[i].N-1);
 
-  g[i].U   = (double**) calloc (sizeof(double*), g[i].N);
-  g[i].Un  = (double**) calloc (sizeof(double*), g[i].N);
-  g[i].Res = (double**) calloc (sizeof(double*), g[i].N);
-  g[i].f   = (double**) calloc (sizeof(double*), g[i].N);
-
-  for (int j = 0; j < g[i].N ; j++)
-  {
-   g[i].U[j]   = (double*) calloc (sizeof(double), g[i].N);
-   g[i].Un[j]  = (double*) calloc (sizeof(double), g[i].N);
-   g[i].Res[j] = (double*) calloc (sizeof(double), g[i].N);
-   g[i].f[j]   = (double*) calloc (sizeof(double), g[i].N);
-  }
+  //make arrays contiguous in memory
+  g[i].U   = alloc2D<double>(g[i].N, g[i].N);
+  g[i].Un  = alloc2D<double>(g[i].N, g[i].N);
+  g[i].Res = alloc2D<double>(g[i].N, g[i].N);
+  g[i].f   = alloc2D<double>(g[i].N, g[i].N);
  }
 
  // Setting up problem.
