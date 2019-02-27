@@ -17,8 +17,8 @@ public:
   double** Res; // Residual Grid
 };
 
-int blockWidth = 16;
-int blockHeight = 16; 
+int blockWidth = 32;
+int blockHeight = 8; 
 
 //helper to make allocations nicer
 template<typename T>
@@ -66,7 +66,8 @@ void heat2DSolver(Heat2DSetup& s)
 	      g[i].Un[j]  = (double*) calloc (sizeof(double), g[i].N);
 	      g[i].Res[j] = (double*) calloc (sizeof(double), g[i].N);
 	      g[i].f[j]   = (double*) calloc (sizeof(double), g[i].N);
-	    }}
+	    }
+	}
     }
 
   // Setting up problem.
