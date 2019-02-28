@@ -276,6 +276,8 @@ void Heat2DSetup::verifySolution()
 	double err_tol = 1e-3;
 	if (L2_err > err_tol) { printf("Verification Failed!\n"); printf(" L2_err   = %e > %e\n", L2_err,err_tol); exit(-1); }
 	if (Linf_err > err_tol) { printf("Verification Failed!\n"); printf(" Linf_err = %e > %e\n", Linf_err,err_tol); exit(-1); }
+	printf(" L2_err   = %e > %e\n", L2_err,err_tol);
+	printf(" Linf_err = %e > %e\n", Linf_err,err_tol);
   printf("Verification Passed.\n");
 
 }
