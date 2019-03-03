@@ -175,8 +175,8 @@ void adjustShift(GridLevel * g, int grids){
 //helper to make allocations nicer
 template<typename T>
 T** alloc2D(loop_t dim1, loop_t dim2){
-  while (dim1%blockWidth != 0) dim1++;
-  while (dim2%blockHeight != 0) dim2++;
+  while ((dim1-0)%blockWidth != 0) dim1++;
+  while ((dim2-0)%blockHeight != 0) dim2++;
   T** ret = (T**)malloc(sizeof(T*) * dim1 + sizeof(T) * dim1 * dim2);
   T* start = (T*)(ret + dim1);
   for (loop_t i = 0; i < dim1; i++) ret[i] = start + i * dim2;
@@ -190,8 +190,8 @@ void heat2DSolver(Heat2DSetup& s)
 {
   // Multigrid parameters -- Find the best configuration!
   s.setGridCount(6);     // Number of Multigrid levels to use
-  s.downRelaxations = 3; // Number of Relaxations before restriction
-  s.upRelaxations   = 1;   // Number of Relaxations after prolongation
+  s.downRelaxations = 5; // Number of Relaxations before restriction
+  s.upRelaxations   = 5;   // Number of Relaxations after prolongation
 
   // Allocating Grids -- Is there a better way to allocate these grids?
   GridLevel* g = (GridLevel*) calloc(sizeof(GridLevel), s.gridCount);
