@@ -231,7 +231,7 @@ void heat2DSolver(Heat2DSetup& s)
   highPrecMode = 0;
   //adjustShift(g, s.gridCount);
 
-  for (loop_t mode = 0; mode <(1 + SLOW_MODE) ; mode++){
+  for (loop_t mode = 1; mode <(1 + SLOW_MODE) ; mode++){
     
     int blub = 0;
     //s.calculateL2Norm_(g, 0); // Calculating Residual L2 Norm
@@ -319,19 +319,19 @@ void applyJacobi(GridLevel* g, int l, int relaxations)
 	  g[l].dU[i][j] = g[l].df[i][j]*fac;
     }
     for (int r = (l > 0); r < relaxations; r++) {
-	swap(g[l].dUn, g[l].dU);
+      swap(g[l].dUn, g[l].dU);
 
-    for (loop_t x = 1; x < N; x += blockWidth)
-      for (loop_t y = 1; y < N; y += blockHeight){
-	loop_t W = min(N, x + blockWidth);
-	loop_t H = min(N, y + blockHeight);
-	for (loop_t i = x; i < W; i++){
-	  for (loop_t j = y; j < H; j++) {
-		g[l].dU[i][j] = (g[l].dUn[i-1][j] + g[l].dUn[i+1][j] + g[l].dUn[i][j-1] + g[l].dUn[i][j+1])* 0.25 + g[l].df[i][j]*fac;
+      for (loop_t x = 1; x < N; x += blockWidth)
+	for (loop_t y = 1; y < N; y += blockHeight){
+	  loop_t W = min(N, x + blockWidth);
+	  loop_t H = min(N, y + blockHeight);
+	  for (loop_t i = x; i < W; i++){
+	    for (loop_t j = y; j < H; j++) {
+	      g[l].dU[i][j] = (g[l].dUn[i-1][j] + g[l].dUn[i+1][j] + g[l].dUn[i][j-1] + g[l].dUn[i][j+1])* 0.25 + g[l].df[i][j]*fac;
+	    }
 	  }
 	}
-      }
-      }
+    }
   }
   else{
     if (l > 0){
@@ -344,25 +344,25 @@ void applyJacobi(GridLevel* g, int l, int relaxations)
     }
     for (int r = (l > 0); r < relaxations; r++) {
       
-	swap(g[l].Un, g[l].U);
+      swap(g[l].Un, g[l].U);
 
-	loop_t N = g[l].N-1;
-	numeric fac =  (g[l].h * g[l].h);
+      loop_t N = g[l].N-1;
+      numeric fac =  (g[l].h * g[l].h);
 
-	numeric logn = logNum(fac) - fReduction[l] + 1;
-    for (loop_t x = 1; x < N; x += blockWidth)
-      for (loop_t y = 1; y < N; y += blockHeight){
-	loop_t W = min(N, x + blockWidth);
-	loop_t H = min(N, y + blockHeight);
-	for (loop_t i = x; i < W; i++){
-	  for (loop_t j = y; j < H; j++) {
-		g[l].U[i][j] = ((((g[l].Un[i-1][j] + g[l].Un[i+1][j]) >> 1) + ((g[l].Un[i][j-1] + g[l].Un[i][j+1]) >> 1)) + (numeric)(g[l].f[i][j] >> logn)) >> 1;
+      numeric logn = logNum(fac) - fReduction[l] + 1;
+      for (loop_t x = 1; x < N; x += blockWidth)
+	for (loop_t y = 1; y < N; y += blockHeight){
+	  loop_t W = min(N, x + blockWidth);
+	  loop_t H = min(N, y + blockHeight);
+	  for (loop_t i = x; i < W; i++){
+	    for (loop_t j = y; j < H; j++) {
+	      g[l].U[i][j] = ((((g[l].Un[i-1][j] + g[l].Un[i+1][j]) >> 1) + ((g[l].Un[i][j-1] + g[l].Un[i][j+1]) >> 1)) + (numeric)(g[l].f[i][j] >> logn)) >> 1;
+	    }
 	  }
 	}
-      }
     }
   }
-    }
+}
 
 void calculateResidual(GridLevel* g, int l)
 {
@@ -473,13 +473,13 @@ void applyProlongation(GridLevel* g, int l)
 	loop_t H = min(N, y + blockHeight);
 	for (loop_t i = x; i < W; i++){
 	  for (loop_t j = y; j < H; j++) {
-	g[l-1].dU[2*i][2*j] += g[l].dU[i][j];
-	g[l-1].dU[2*i-1][2*j] += ( g[l].dU[i-1][j] + g[l].dU[i][j] ) * 0.5;
-	g[l-1].dU[2*i][2*j-1] += ( g[l].dU[i][j-1] + g[l].dU[i][j] )  * 0.5;
-	g[l-1].dU[2*i-1][2*j-1] += ( g[l].dU[i-1][j-1] + g[l].dU[i-1][j] + g[l].dU[i][j-1] + g[l].dU[i][j] ) * 0.25;
-      }
-    }
+	    g[l-1].dU[2*i][2*j] += g[l].dU[i][j];
+	    g[l-1].dU[2*i-1][2*j] += ( g[l].dU[i-1][j] + g[l].dU[i][j] ) * 0.5;
+	    g[l-1].dU[2*i][2*j-1] += ( g[l].dU[i][j-1] + g[l].dU[i][j] )  * 0.5;
+	    g[l-1].dU[2*i-1][2*j-1] += ( g[l].dU[i-1][j-1] + g[l].dU[i-1][j] + g[l].dU[i][j-1] + g[l].dU[i][j] ) * 0.25;
 	  }
+	}
+      }
 
     for (loop_t j = 1; j < g[l].N-1; j++){
       i = g[l].N -1;
@@ -509,12 +509,12 @@ void applyProlongation(GridLevel* g, int l)
 	loop_t H = min(N, y + blockHeight);
 	for (loop_t i = x; i < W; i++){
 	  for (loop_t j = y; j < H; j++) {
-	g[l-1].U[(i<<1)][(j<<1)] += g[l].U[i][j] >> shift;
-	g[l-1].U[(i<<1)-1][(j<<1)] += ( g[l].U[i-1][j] + g[l].U[i][j] ) >> shift2;
-	g[l-1].U[(i<<1)-1][(j<<1)-1] += ((( g[l].U[i-1][j-1] + g[l].U[i-1][j] ) >> 1 )+ ((g[l].U[i][j-1] + g[l].U[i][j] ) >> 1 )) >> shift2;
-	g[l-1].U[(i<<1)][(j<<1)-1] += ( g[l].U[i][j-1] + g[l].U[i][j] ) >> shift2;
-      }
-    }
+	    g[l-1].U[(i<<1)][(j<<1)] += g[l].U[i][j] >> shift;
+	    g[l-1].U[(i<<1)-1][(j<<1)] += ( g[l].U[i-1][j] + g[l].U[i][j] ) >> shift2;
+	    g[l-1].U[(i<<1)-1][(j<<1)-1] += ((( g[l].U[i-1][j-1] + g[l].U[i-1][j] ) >> 1 )+ ((g[l].U[i][j-1] + g[l].U[i][j] ) >> 1 )) >> shift2;
+	    g[l-1].U[(i<<1)][(j<<1)-1] += ( g[l].U[i][j-1] + g[l].U[i][j] ) >> shift2;
+	  }
+	}
       }
     
     for (loop_t j = 1; j < N; j++) {
