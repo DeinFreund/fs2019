@@ -1,6 +1,3 @@
-#pragma vector aligned
-#pragma ivdep
-
 #include <stdio.h>
 #include <math.h>
 #include <stdlib.h>
@@ -32,8 +29,10 @@ public:
   double** dRes; // Residual Grid
 };
 
-loop_t blockWidth = 32;
-loop_t blockHeight = 8;
+loop_t blockWidth = 256;
+loop_t blockHeight = 256;
+loop_t allocBlockWidth = 1;
+loop_t allocBlockHeight = 1;
 
 //the following values represent the decimal places of the fixed point numbers
 int* shifts;
@@ -175,9 +174,9 @@ void adjustShift(GridLevel * g, int grids){
 //helper to make allocations nicer
 template<typename T>
 T** alloc2D(loop_t dim1, loop_t dim2){
-  while ((dim1-0)%blockWidth != 0) dim1++;
-  while ((dim2-0)%blockHeight != 0) dim2++;
-  T** ret = (T**)malloc(sizeof(T*) * dim1 + sizeof(T) * dim1 * dim2);
+  while ((dim1-0)%allocBlockWidth != 0) dim1++;
+  while ((dim2-0)%allocBlockHeight != 0) dim2++;
+  T** ret = (T**)aligned_alloc(16, sizeof(T*) * dim1 + sizeof(T) * dim1 * dim2);
   T* start = (T*)(ret + dim1);
   for (loop_t i = 0; i < dim1; i++) ret[i] = start + i * dim2;
   for (loop_t i = 0; i < dim1; i++) for (loop_t j = 0; j < dim2; j++) ret[i][j] = 0;
@@ -190,8 +189,8 @@ void heat2DSolver(Heat2DSetup& s)
 {
   // Multigrid parameters -- Find the best configuration!
   s.setGridCount(6);     // Number of Multigrid levels to use
-  s.downRelaxations = 5; // Number of Relaxations before restriction
-  s.upRelaxations   = 5;   // Number of Relaxations after prolongation
+  s.downRelaxations = 3; // Number of Relaxations before restriction
+  s.upRelaxations   = 1;   // Number of Relaxations after prolongation
 
   // Allocating Grids -- Is there a better way to allocate these grids?
   GridLevel* g = (GridLevel*) calloc(sizeof(GridLevel), s.gridCount);
@@ -231,7 +230,7 @@ void heat2DSolver(Heat2DSetup& s)
   highPrecMode = 0;
   //adjustShift(g, s.gridCount);
 
-  for (loop_t mode = 1; mode <(1 + SLOW_MODE) ; mode++){
+  for (loop_t mode = 0; mode <(1 + SLOW_MODE) ; mode++){
     
     int blub = 0;
     //s.calculateL2Norm_(g, 0); // Calculating Residual L2 Norm
@@ -315,19 +314,27 @@ void applyJacobi(GridLevel* g, int l, int relaxations)
     loop_t N = g[l].N-1;
     if (l > 0){
       for (loop_t i = 1; i < N; i++)
+#pragma vector aligned
+#pragma ivdep
 	for (loop_t j = 1; j < N; j++) // Perform a Jacobi Iteration
 	  g[l].dU[i][j] = g[l].df[i][j]*fac;
     }
     for (int r = (l > 0); r < relaxations; r++) {
       swap(g[l].dUn, g[l].dU);
 
+      size_t stride = g[l].N;
       for (loop_t x = 1; x < N; x += blockWidth)
 	for (loop_t y = 1; y < N; y += blockHeight){
 	  loop_t W = min(N, x + blockWidth);
 	  loop_t H = min(N, y + blockHeight);
 	  for (loop_t i = x; i < W; i++){
+	    double* startU = g[l].dU[i];
+	    double* startUn = g[l].dUn[i];
+	    double* startf = g[l].df[i];
+	    //#pragma vector aligned
+	    //#pragma ivdep
 	    for (loop_t j = y; j < H; j++) {
-	      g[l].dU[i][j] = (g[l].dUn[i-1][j] + g[l].dUn[i+1][j] + g[l].dUn[i][j-1] + g[l].dUn[i][j+1])* 0.25 + g[l].df[i][j]*fac;
+	    g[l].dU[i][j] = (*(startUn-stride+j) + *(startUn+stride+j) + *(startUn+j-1) + *(startUn+j+1))* 0.25 + *(startf+j)*fac;
 	    }
 	  }
 	}
@@ -339,6 +346,8 @@ void applyJacobi(GridLevel* g, int l, int relaxations)
       numeric fac =  (g[l].h * g[l].h);
       numeric logn = logNum(fac) - fReduction[l] + 2;
       for (loop_t i = 1; i < N; i++)
+#pragma vector aligned
+#pragma ivdep
 	for (loop_t j = 1; j < N; j++) // Perform a Jacobi Iteration
 	  g[l].U[i][j] =  (numeric)(g[l].f[i][j] >> logn);
     }
@@ -355,6 +364,8 @@ void applyJacobi(GridLevel* g, int l, int relaxations)
 	  loop_t W = min(N, x + blockWidth);
 	  loop_t H = min(N, y + blockHeight);
 	  for (loop_t i = x; i < W; i++){
+#pragma vector aligned
+#pragma ivdep
 	    for (loop_t j = y; j < H; j++) {
 	      g[l].U[i][j] = ((((g[l].Un[i-1][j] + g[l].Un[i+1][j]) >> 1) + ((g[l].Un[i][j-1] + g[l].Un[i][j+1]) >> 1)) + (numeric)(g[l].f[i][j] >> logn)) >> 1;
 	    }
@@ -375,6 +386,8 @@ void calculateResidual(GridLevel* g, int l)
 	loop_t W = min(N, x + blockWidth);
 	loop_t H = min(N, y + blockHeight);
 	for (loop_t i = x; i < W; i++){
+#pragma vector aligned
+#pragma ivdep
 	  for (loop_t j = y; j < H; j++) {
 	    g[l].dRes[i][j] = g[l].df[i][j] + (g[l].dU[i-1][j] + g[l].dU[i+1][j] - 4*g[l].dU[i][j] + g[l].dU[i][j-1] + g[l].dU[i][j+1]) * fac;
 	  }
@@ -390,6 +403,8 @@ void calculateResidual(GridLevel* g, int l)
 	loop_t W = min(N, x + blockWidth);
 	loop_t H = min(N, y + blockHeight);
 	for (loop_t i = x; i < W; i++){
+#pragma vector aligned
+#pragma ivdep
 	  for (loop_t j = y; j < H; j++) {
 	    g[l].Res[i][j] = g[l].f[i][j] + (((numericF)(g[l].U[i-1][j] + g[l].U[i+1][j] - (((numericF)g[l].U[i][j]) << 2) + g[l].U[i][j-1] + g[l].U[i][j+1])) << (logn) );
 	  }

@@ -1,4 +1,4 @@
-CFLAGS = -O2
+CFLAGS = -Ofast -fno-alias -D NOFUNCCALL -qopt-report=2 -qopt-report-phase=vec -D NOALIAS -D ALIGNED
 #CFLAGS = -O3 -Wall -ftree-vectorize -fopt-info-all -march=native -msse2 -D NOALIAS
 #-ffast-math
 #-D NOFUNCCALL -D NOALIAS
