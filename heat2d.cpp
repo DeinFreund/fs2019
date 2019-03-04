@@ -2,6 +2,7 @@
 #include <math.h>
 #include <stdlib.h>
 #include "auxiliar/auxiliar.hpp"
+#include <mm_malloc.h>
 
 #include <iostream> //debugging
 using namespace std;
@@ -9,7 +10,7 @@ using loop_t=unsigned int;
 using numeric=long ;
 using numericF= long;
 #define debug 0
-#define SLOW_MODE 1 // set this to one if the code isn't accurate enough
+#define SLOW_MODE 0 // set this to one if the code isn't accurate enough
 
 class GridLevel
 {
@@ -31,8 +32,8 @@ public:
 
 loop_t blockWidth = 256;
 loop_t blockHeight = 256;
-loop_t allocBlockWidth = 1;
-loop_t allocBlockHeight = 1;
+loop_t allocBlockWidth = 2;
+loop_t allocBlockHeight = 2;
 
 //the following values represent the decimal places of the fixed point numbers
 int* shifts;
@@ -176,8 +177,11 @@ template<typename T>
 T** alloc2D(loop_t dim1, loop_t dim2){
   while ((dim1-0)%allocBlockWidth != 0) dim1++;
   while ((dim2-0)%allocBlockHeight != 0) dim2++;
-  T** ret = (T**)aligned_alloc(16, sizeof(T*) * dim1 + sizeof(T) * dim1 * dim2);
-  T* start = (T*)(ret + dim1);
+  loop_t off = 0;
+  //cerr << dim1+7 << endl;
+  T** ret = (T**)_mm_malloc(sizeof(T*) * (dim1+off),64);
+  T** arr = (T**)_mm_malloc(sizeof(T) * (dim1+off) * (dim2+off)+ 128, 64);
+  T* start = (T*)(arr);
   for (loop_t i = 0; i < dim1; i++) ret[i] = start + i * dim2;
   for (loop_t i = 0; i < dim1; i++) for (loop_t j = 0; j < dim2; j++) ret[i][j] = 0;
   return ret;
@@ -230,7 +234,7 @@ void heat2DSolver(Heat2DSetup& s)
   highPrecMode = 0;
   //adjustShift(g, s.gridCount);
 
-  for (loop_t mode = 0; mode <(1 + SLOW_MODE) ; mode++){
+  for (loop_t mode = SLOW_MODE; mode <(1 + SLOW_MODE) ; mode++){
     
     int blub = 0;
     //s.calculateL2Norm_(g, 0); // Calculating Residual L2 Norm
@@ -314,7 +318,7 @@ void applyJacobi(GridLevel* g, int l, int relaxations)
     loop_t N = g[l].N-1;
     if (l > 0){
       for (loop_t i = 1; i < N; i++)
-#pragma vector aligned
+	//#pragma vector aligned
 #pragma ivdep
 	for (loop_t j = 1; j < N; j++) // Perform a Jacobi Iteration
 	  g[l].dU[i][j] = g[l].df[i][j]*fac;
@@ -322,7 +326,7 @@ void applyJacobi(GridLevel* g, int l, int relaxations)
     for (int r = (l > 0); r < relaxations; r++) {
       swap(g[l].dUn, g[l].dU);
 
-      size_t stride = g[l].N;
+      size_t stride = g[l].N+allocBlockWidth-1;
       for (loop_t x = 1; x < N; x += blockWidth)
 	for (loop_t y = 1; y < N; y += blockHeight){
 	  loop_t W = min(N, x + blockWidth);
@@ -331,10 +335,10 @@ void applyJacobi(GridLevel* g, int l, int relaxations)
 	    double* startU = g[l].dU[i];
 	    double* startUn = g[l].dUn[i];
 	    double* startf = g[l].df[i];
-	    //#pragma vector aligned
-	    //#pragma ivdep
+      	    ////#pragma vector aligned
+	    #pragma ivdep
 	    for (loop_t j = y; j < H; j++) {
-	    g[l].dU[i][j] = (*(startUn-stride+j) + *(startUn+stride+j) + *(startUn+j-1) + *(startUn+j+1))* 0.25 + *(startf+j)*fac;
+	      g[l].dU[i][j] = (*(startUn+j-stride) + *(startUn+j+stride) + *(startUn+j-1) + *(startUn+j+1))* 0.25 + *(startf+j)*fac;
 	    }
 	  }
 	}
@@ -346,7 +350,7 @@ void applyJacobi(GridLevel* g, int l, int relaxations)
       numeric fac =  (g[l].h * g[l].h);
       numeric logn = logNum(fac) - fReduction[l] + 2;
       for (loop_t i = 1; i < N; i++)
-#pragma vector aligned
+//#pragma vector aligned
 #pragma ivdep
 	for (loop_t j = 1; j < N; j++) // Perform a Jacobi Iteration
 	  g[l].U[i][j] =  (numeric)(g[l].f[i][j] >> logn);
@@ -364,7 +368,7 @@ void applyJacobi(GridLevel* g, int l, int relaxations)
 	  loop_t W = min(N, x + blockWidth);
 	  loop_t H = min(N, y + blockHeight);
 	  for (loop_t i = x; i < W; i++){
-#pragma vector aligned
+	    ////#pragma vector aligned
 #pragma ivdep
 	    for (loop_t j = y; j < H; j++) {
 	      g[l].U[i][j] = ((((g[l].Un[i-1][j] + g[l].Un[i+1][j]) >> 1) + ((g[l].Un[i][j-1] + g[l].Un[i][j+1]) >> 1)) + (numeric)(g[l].f[i][j] >> logn)) >> 1;
@@ -386,7 +390,7 @@ void calculateResidual(GridLevel* g, int l)
 	loop_t W = min(N, x + blockWidth);
 	loop_t H = min(N, y + blockHeight);
 	for (loop_t i = x; i < W; i++){
-#pragma vector aligned
+	  ////#pragma vector aligned
 #pragma ivdep
 	  for (loop_t j = y; j < H; j++) {
 	    g[l].dRes[i][j] = g[l].df[i][j] + (g[l].dU[i-1][j] + g[l].dU[i+1][j] - 4*g[l].dU[i][j] + g[l].dU[i][j-1] + g[l].dU[i][j+1]) * fac;
@@ -403,7 +407,7 @@ void calculateResidual(GridLevel* g, int l)
 	loop_t W = min(N, x + blockWidth);
 	loop_t H = min(N, y + blockHeight);
 	for (loop_t i = x; i < W; i++){
-#pragma vector aligned
+	  ////#pragma vector aligned
 #pragma ivdep
 	  for (loop_t j = y; j < H; j++) {
 	    g[l].Res[i][j] = g[l].f[i][j] + (((numericF)(g[l].U[i-1][j] + g[l].U[i+1][j] - (((numericF)g[l].U[i][j]) << 2) + g[l].U[i][j-1] + g[l].U[i][j+1])) << (logn) );
@@ -418,6 +422,9 @@ double calculateL2Norm(GridLevel* g, int l)
   if (highPrecMode){
     double tmp = 0.0;
     for (loop_t i = 0; i < g[l].N; i++)
+
+//#pragma vector aligned
+#pragma ivdep
       for (loop_t j = 0; j < g[l].N; j++)
 	tmp += g[l].dRes[i][j]*g[l].dRes[i][j];
 
@@ -427,6 +434,9 @@ double calculateL2Norm(GridLevel* g, int l)
     int s = l2NormShift;
     long long tmp = 0.0;
     for (loop_t i = 0; i < g[l].N; i++)
+
+//#pragma vector aligned
+#pragma ivdep
       for (loop_t j = 0; j < g[l].N; j++){
 	tmp += intSquare(g[l].Res[i][j] << s, l);
 	//if (debug) cerr << g[l].Res[i][j] << " | " << intSquare(g[l].Res[i][j]) << " | " << tmp << endl;
@@ -446,6 +456,9 @@ void applyRestriction(GridLevel* g, int l)
 	loop_t W = min(N, x + blockWidth);
 	loop_t H = min(N, y + blockHeight);
 	for (loop_t i = x; i < W; i++){
+
+	  ////#pragma vector aligned
+#pragma ivdep
 	  for (loop_t j = y; j < H; j++) {
 	    g[l].df[i][j] = ( 1.0*( g[l-1].dRes[2*i-1][2*j-1] + g[l-1].dRes[2*i-1][2*j+1] + g[l-1].dRes[2*i+1][2*j-1]   + g[l-1].dRes[2*i+1][2*j+1] ) +
 			      2.0*( g[l-1].dRes[2*i-1][2*j]   + g[l-1].dRes[2*i][2*j-1]   + g[l-1].dRes[2*i+1][2*j]     + g[l-1].dRes[2*i][2*j+1]   ) +
@@ -463,6 +476,9 @@ void applyRestriction(GridLevel* g, int l)
 	loop_t W = min(N, x + blockWidth);
 	loop_t H = min(N, y + blockHeight);
 	for (loop_t i = x; i < W; i++){
+
+	  ////#pragma vector aligned
+#pragma ivdep
 	  for (loop_t j = y; j < H; j++) {
 	    g[l].f[i][j] = (( ( ((g[l-1].Res[(i<<1)-1][(j<<1)-1] + g[l-1].Res[(i<<1)-1][(j<<1)+1])>> 1) + ((g[l-1].Res[(i<<1)+1][(j<<1)-1]   + g[l-1].Res[(i<<1)+1][(j<<1)+1]) >> 1) ) >> 3) +
 			    (((( g[l-1].Res[(i<<1)-1][(j<<1)]   + g[l-1].Res[(i<<1)][(j<<1)-1]) >> 1)   + ((g[l-1].Res[(i<<1)+1][(j<<1)]     + g[l-1].Res[(i<<1)][(j<<1)+1])>> 1)   ) >> 2) +
@@ -487,6 +503,9 @@ void applyProlongation(GridLevel* g, int l)
 	loop_t W = min(N, x + blockWidth);
 	loop_t H = min(N, y + blockHeight);
 	for (loop_t i = x; i < W; i++){
+
+	  ////#pragma vector aligned
+#pragma ivdep
 	  for (loop_t j = y; j < H; j++) {
 	    g[l-1].dU[2*i][2*j] += g[l].dU[i][j];
 	    g[l-1].dU[2*i-1][2*j] += ( g[l].dU[i-1][j] + g[l].dU[i][j] ) * 0.5;
@@ -496,6 +515,8 @@ void applyProlongation(GridLevel* g, int l)
 	}
       }
 
+    ////#pragma vector aligned
+#pragma ivdep
     for (loop_t j = 1; j < g[l].N-1; j++){
       i = g[l].N -1;
       g[l-1].dU[2*i-1][2*j] += ( g[l].dU[i-1][j] + g[l].dU[i][j] ) * 0.5;
@@ -503,6 +524,8 @@ void applyProlongation(GridLevel* g, int l)
     }
     
     int j =g[l].N -1 ;
+    ////#pragma vector aligned
+#pragma ivdep
     for (i = 1; i < N; i++){
       g[l-1].dU[2*i][2*j-1] += ( g[l].dU[i][j-1] + g[l].dU[i][j] )  * 0.5;
       g[l-1].dU[2*i-1][2*j-1] += ( g[l].dU[i-1][j-1] + g[l].dU[i-1][j] + g[l].dU[i][j-1] + g[l].dU[i][j] ) * 0.25;
@@ -523,6 +546,8 @@ void applyProlongation(GridLevel* g, int l)
 	loop_t W = min(N, x + blockWidth);
 	loop_t H = min(N, y + blockHeight);
 	for (loop_t i = x; i < W; i++){
+	  //#pragma vector aligned
+#pragma ivdep
 	  for (loop_t j = y; j < H; j++) {
 	    g[l-1].U[(i<<1)][(j<<1)] += g[l].U[i][j] >> shift;
 	    g[l-1].U[(i<<1)-1][(j<<1)] += ( g[l].U[i-1][j] + g[l].U[i][j] ) >> shift2;
@@ -532,12 +557,16 @@ void applyProlongation(GridLevel* g, int l)
 	}
       }
     
+	  //#pragma vector aligned
+#pragma ivdep
     for (loop_t j = 1; j < N; j++) {
       i = g[l].N -1;
       g[l-1].U[(i<<1)-1][(j<<1)] += ( g[l].U[i-1][j] + g[l].U[i][j] ) >> shift2;
       g[l-1].U[(i<<1)-1][(j<<1)-1] += ((( g[l].U[i-1][j-1] + g[l].U[i-1][j] ) >> 1 )+ ((g[l].U[i][j-1] + g[l].U[i][j] ) >> 1 )) >> shift2;
     }
     int j =g[l].N -1 ;
+    //#pragma vector aligned
+#pragma ivdep
     for (i = 1; i < N; i++){
       g[l-1].U[(i<<1)][(j<<1)-1] += ( g[l].U[i][j-1] + g[l].U[i][j] ) >> shift2;
       g[l-1].U[(i<<1)-1][(j<<1)-1] += ((( g[l].U[i-1][j-1] + g[l].U[i-1][j] ) >> 1 )+ ((g[l].U[i][j-1] + g[l].U[i][j] ) >> 1 )) >> shift2;
