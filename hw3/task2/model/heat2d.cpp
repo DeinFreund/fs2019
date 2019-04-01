@@ -11,6 +11,7 @@
 #include "heat2d.hpp"
 //#include "mpi.h"
 #include "string.h"
+#include <iostream>
 
 pointsInfo p;
 
