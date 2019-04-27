@@ -11,13 +11,13 @@ size_t nParameters;
 
 int main(int argc, char* argv[])
 {
-	nSamples = NSAMPLES;
-	nParameters = NPARAMETERS;
+  nSamples = NSAMPLES;
+  nParameters = NPARAMETERS;
 
-	double* sampleArray = initializeSampler(nSamples, nParameters);
-	double* resultsArray = (double*) calloc (nSamples, sizeof(double));
+  double* sampleArray = initializeSampler(nSamples, nParameters);
+  double* resultsArray = (double*) calloc (nSamples, sizeof(double));
 
-	printf("Processing %ld Samples each with %ld Parameter(s)...\n", nSamples, nParameters);
+  printf("Processing %ld Samples each with %ld Parameter(s)...\n", nSamples, nParameters);
 
   auto start = std::chrono::system_clock::now();
   for (size_t i = 0; i < nSamples; i++) resultsArray[i] = evaluateSample(&sampleArray[i*nParameters]);
@@ -28,5 +28,5 @@ int main(int argc, char* argv[])
   double totalTime = std::chrono::duration<double>(end-start).count();
   printf("Total Running Time: %.3fs\n", totalTime);
 
-	return 0;
+  return 0;
 }
