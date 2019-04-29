@@ -68,9 +68,10 @@ int main(int argc, char* argv[])
   }
   
   printf("Rank %1d has finished.\n", rankId);
-  upcxx::barrier();
-
   auto t1 = std::chrono::system_clock::now();
+
+  upcxx::barrier();
+  if (rankId == 0)  t1 = std::chrono::system_clock::now();
 
   if (rankId == 0)
   {
@@ -79,6 +80,10 @@ int main(int argc, char* argv[])
     checkResults(res_ptr.local()); // Make sure you check results!
     double evalTime = std::chrono::duration<double>(t1-t0).count();
     printf("Total Running Time: %.3fs\n", evalTime);
+  }else{
+    double evalTime = std::chrono::duration<double>(t1-t0).count();
+    printf("Running Time: %.3fs\n", evalTime);
+
   }
   
   upcxx::finalize();

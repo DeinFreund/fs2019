@@ -70,7 +70,7 @@ int main(int argc, char* argv[])
   int Ng = 2000; // max generations for CMAES
 	
   solver.setStopMinDeltaX(1e-6);
-  solver.setPopulationSize(8); // ~4+3*log(N)
+  solver.setPopulationSize(23); // ~4+3*log(N) //changed for subtask 4
   solver.setMu(4);
   solver.setMaxGenerations(Ng);
   solver.run();
