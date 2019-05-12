@@ -17,7 +17,7 @@ pointsInfo __p;
 int main(int argc, char* argv[])
 {
   double tolerance = 1e-0; // L2 Difference Tolerance before reaching convergence.
-  size_t N0 = 10; // 2^N0 + 1 elements per side
+  size_t N0 = 7; // 2^N0 + 1 elements per side
 
   // Multigrid parameters -- Find the best configuration!
   size_t gridCount       = N0-1;     // Number of Multigrid levels to use
@@ -56,26 +56,25 @@ int main(int argc, char* argv[])
   return 0;
 }
 
+bool failed = 0;
 
 void checkCUDAError(const char *msg)
 {
   cudaError_t err = cudaGetLastError();
-  if( cudaSuccess != err)
+  if( cudaSuccess != err && !failed)
     {
       fprintf(stderr, "CUDA Error: %s: %s.\n", msg, cudaGetErrorString(err) );
-      exit(EXIT_FAILURE);
+      failed = 1;
+      //exit(EXIT_FAILURE);
     }
 }
 
-//__global__
+__global__
 void jacobi(double h2, double* U, double* Un, double* f, size_t N)
 {
-  //int index = blockIdx.x * blockDim.x + threadIdx.x;
-  //int stride = blockDim.x * gridDim.x;
-  double h1 = 0.25;
-  for (size_t i = 1; i < N-1; i++)
-	for (size_t j = i*N+1; j < i*N+N-1; j++) // Perform a Jacobi Iteration
-	  U[j] = (Un[j-N] + Un[j+N] + Un[j-1] + Un[j+1] + f[j]*h2)*h1;
+  size_t j = (blockIdx.y*blockDim.y+threadIdx.y)*N + blockIdx.x*blockDim.x+threadIdx.x;
+  if (j % N == 0 || j % N == N - 1 || j / N == 0 || j / N == N - 1) return;
+  U[j] = (Un[j-N] + Un[j+N] + Un[j-1] + Un[j+1] + f[j]*h2)*0.25;
 }
 
 void applyJacobi(gridLevel* g, size_t l, size_t relaxations)
@@ -83,22 +82,28 @@ void applyJacobi(gridLevel* g, size_t l, size_t relaxations)
   auto t0 = std::chrono::system_clock::now();
 
 
+  //fprintf(stderr, "running jacobi\n");
   cudaMemcpy(g[l].gU, g[l].U, sizeof(double)*g[l].N*g[l].N, cudaMemcpyHostToDevice); checkCUDAError("Error copying U");
   cudaMemcpy(g[l].gUn, g[l].Un, sizeof(double)*g[l].N*g[l].N, cudaMemcpyHostToDevice); checkCUDAError("Error copying Un");
   cudaMemcpy(g[l].gf, g[l].f, sizeof(double)*g[l].N*g[l].N, cudaMemcpyHostToDevice); checkCUDAError("Error copying f"); 
+  int blockSize = std::min((size_t)32,g[l].N);
+  dim3 threadsPerBlock(blockSize, blockSize);
+  dim3 blocksPerGrid(g[l].N/blockSize, g[l].N/blockSize);
 
   for (size_t r = 0; r < relaxations; r++)
     {
       double* tmp = g[l].Un; g[l].Un = g[l].U; g[l].U = tmp;
       tmp = g[l].gUn; g[l].gUn = g[l].gU; g[l].gU = tmp;
-      jacobi(g[l].h*g[l].h, g[l].U, g[l].Un, g[l].f, g[l].N);
-      //cudaDeviceSynchronize();
+      jacobi<<<blocksPerGrid, threadsPerBlock>>>(g[l].h*g[l].h, g[l].gU, g[l].gUn, g[l].gf, g[l].N);
+      checkCUDAError("Error running Jacobi Kernel");
+      cudaDeviceSynchronize();
 	  
     }
   
   cudaMemcpy(g[l].U, g[l].gU, sizeof(double)*g[l].N*g[l].N, cudaMemcpyDeviceToHost); checkCUDAError("Error copying U back");
   cudaMemcpy(g[l].Un, g[l].gUn, sizeof(double)*g[l].N*g[l].N, cudaMemcpyDeviceToHost); checkCUDAError("Error copying Un back");
   cudaMemcpy(g[l].f, g[l].gf, sizeof(double)*g[l].N*g[l].N, cudaMemcpyDeviceToHost); checkCUDAError("Error copying f back"); 
+  cudaDeviceSynchronize();
 
 
   auto t1 = std::chrono::system_clock::now();
@@ -144,10 +149,10 @@ void calculateL2Norm(gridLevel* g, size_t l)
 void applyRestriction(gridLevel* g, size_t l)
 {
   auto t0 = std::chrono::system_clock::now();
-  size_t N = g[l].N;
+  size_t N = g[l-1].N;
   for (size_t i = 1; i < g[l].N-1; i++)
     for (size_t j = 1; j < g[l].N-1; j++)
-      g[l].f[i*N+j] = ( 1.0*( g[l-1].Res[(2*i-1)*N+2*j-1] + g[l-1].Res[(2*i-1)*N+2*j+1] + g[l-1].Res[(2*i+1)*N+2*j-1]   + g[l-1].Res[(2*i+1)*N+2*j+1] )   +
+      g[l].f[i*g[l].N+j] = ( 1.0*( g[l-1].Res[(2*i-1)*N+2*j-1] + g[l-1].Res[(2*i-1)*N+2*j+1] + g[l-1].Res[(2*i+1)*N+2*j-1]   + g[l-1].Res[(2*i+1)*N+2*j+1] )   +
 		       2.0*( g[l-1].Res[(2*i-1)*N+2*j]   + g[l-1].Res[(2*i)*N+2*j-1]   + g[l-1].Res[(2*i+1)*N+2*j]     + g[l-1].Res[(2*i)*N+2*j+1] ) +
 		       4.0*( g[l-1].Res[(2*i)*N+2*j] ) ) * 0.0625;
 
@@ -235,7 +240,7 @@ gridLevel* generateInitialConditions(size_t N0, size_t gridCount)
     }
 
   // Initial Guess
-  for (size_t i = 0; i < g[0].N; i++) for (size_t j = 0; j < g[0].N*g[0].N; j++) g[0].U[j] = 1.0;
+  for (size_t j = 0; j < g[0].N*g[0].N; j++) g[0].U[j] = 1.0;
 
   // Boundary Conditions
   for (size_t i = 0; i < g[0].N; i++) g[0].U[i]        = 0.0;
