@@ -20,13 +20,17 @@ typedef struct gridLevelStruct {
  double* U; // Main grid
  double* Un; // Previous Jacobi grid
  double* Res; // Residual Grid
+ double* ResSum; // Sum Grid
  double* gf; // Right hand side (external heat sources)
  double* gU; // Main grid
  double* gUn; // Previous Jacobi grid
  double* gRes; // Residual Grid
+ double* gResSum; // Sum cache
  double L2Norm; // L2 Norm of the residual
  double L2NormPrev; // Previous L2 Norm
  double L2NormDiff; // L2Norm Difference compared to previous step
+ int threadsPerBlock;
+ int blocksPerGrid;
 } gridLevel;
 
 // Helper Functions

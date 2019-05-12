@@ -11,8 +11,30 @@
 #include "heat2d_gpu.hpp"
 #include "string.h"
 #include <chrono>
+#include <iostream>
 
 pointsInfo __p;
+
+void copyToDevice(gridLevel * g, size_t gridCount){
+	
+  for (size_t grid = 0; grid < gridCount; grid++){
+  cudaMemcpy(g[l].gU, g[l].U, sizeof(double)*g[l].N*g[l].N, cudaMemcpyHostToDevice); checkCUDAError("Error copying U");
+  cudaMemcpy(g[l].gUn, g[l].Un, sizeof(double)*g[l].N*g[l].N, cudaMemcpyHostToDevice); checkCUDAError("Error copying Un");
+  cudaMemcpy(g[l].gf, g[l].f, sizeof(double)*g[l].N*g[l].N, cudaMemcpyHostToDevice); checkCUDAError("Error copying f"); 
+    }
+}
+
+
+void copyToHost(gridLevel * g, size_t gridCount){
+	
+  for (size_t grid = 0; grid < gridCount; grid++){
+  cudaMemcpy(g[l].U, g[l].gU, sizeof(double)*g[l].N*g[l].N, cudaMemcpyDeviceToHost); checkCUDAError("Error copying U back");
+  cudaMemcpy(g[l].Un, g[l].gUn, sizeof(double)*g[l].N*g[l].N, cudaMemcpyDeviceToHost); checkCUDAError("Error copying Un back");
+  cudaMemcpy(g[l].f, g[l].gf, sizeof(double)*g[l].N*g[l].N, cudaMemcpyDeviceToHost); checkCUDAError("Error copying f back"); 
+  cudaDeviceSynchronize();
+
+    }
+}
 
 int main(int argc, char* argv[])
 {
@@ -26,28 +48,43 @@ int main(int argc, char* argv[])
 
   gridLevel* g = generateInitialConditions(N0, gridCount);
 
+  
+    cudaDeviceProp deviceProp;
+    cudaGetDeviceProperties(&deviceProp, dev);
+  std::cout << "Using up to " << deviceProp.maxThreadsPerBlock << " threads per block." << std::endl;
+  
   auto startTime = std::chrono::system_clock::now();
+  
+  
+	copyToDevice(g, gridCount);
+  
   while (g[0].L2NormDiff > tolerance)  // Multigrid solver start
     {
       applyJacobi(g, 0, downRelaxations); // Relaxing the finest grid first
       calculateResidual(g, 0); // Calculating Initial Residual
 
       for (size_t grid = 1; grid < gridCount; grid++) // Going down the V-Cycle
-	{
-	  applyRestriction(g, grid); // Restricting the residual to the coarser grid's solution vector (f)
-	  applyJacobi(g, grid, downRelaxations); // Smoothing coarser level
-	  calculateResidual(g, grid); // Calculating Coarse Grid Residual
-	}
+    {
+	copyToHost(g, gridCount);
+      applyRestriction(g, grid); // Restricting the residual to the coarser grid's solution vector (f)
+	copyToDevice(g, gridCount);
+      applyJacobi(g, grid, downRelaxations); // Smoothing coarser level
+      calculateResidual(g, grid); // Calculating Coarse Grid Residual
+    }
 
       for (size_t grid = gridCount-1; grid > 0; grid--) // Going up the V-Cycle
-	{
-	  applyProlongation(g, grid); // Prolonging solution for coarser level up to finer level
-	  applyJacobi(g, grid, upRelaxations); // Smoothing finer level
-	}
+    {
+	copyToHost(g, gridCount);
+      applyProlongation(g, grid); // Prolonging solution for coarser level up to finer level
+	copyToDevice(g, gridCount);
+      applyJacobi(g, grid, upRelaxations); // Smoothing finer level
+    }
 
       calculateL2Norm(g, 0); // Calculating Residual L2 Norm
     }  // Multigrid solver end
 
+	copyToHost(g, gridCount);
+	
   auto endTime = std::chrono::system_clock::now();
   totalTime = std::chrono::duration<double>(endTime-startTime).count();
   printTimings(gridCount);
@@ -72,7 +109,7 @@ void checkCUDAError(const char *msg)
 __global__
 void jacobi(double h2, double* U, double* Un, double* f, size_t N)
 {
-  size_t j = (blockIdx.y*blockDim.y+threadIdx.y)*N + blockIdx.x*blockDim.x+threadIdx.x;
+  size_t j = blockIdx.x*blockDim.x+threadIdx.x;
   if (j % N == 0 || j % N == N - 1 || j / N == 0 || j / N == N - 1) return;
   U[j] = (Un[j-N] + Un[j+N] + Un[j-1] + Un[j+1] + f[j]*h2)*0.25;
 }
@@ -83,12 +120,11 @@ void applyJacobi(gridLevel* g, size_t l, size_t relaxations)
 
 
   //fprintf(stderr, "running jacobi\n");
-  cudaMemcpy(g[l].gU, g[l].U, sizeof(double)*g[l].N*g[l].N, cudaMemcpyHostToDevice); checkCUDAError("Error copying U");
-  cudaMemcpy(g[l].gUn, g[l].Un, sizeof(double)*g[l].N*g[l].N, cudaMemcpyHostToDevice); checkCUDAError("Error copying Un");
-  cudaMemcpy(g[l].gf, g[l].f, sizeof(double)*g[l].N*g[l].N, cudaMemcpyHostToDevice); checkCUDAError("Error copying f"); 
-  int blockSize = std::min((size_t)32,g[l].N);
-  dim3 threadsPerBlock(blockSize, blockSize);
-  dim3 blocksPerGrid(g[l].N/blockSize, g[l].N/blockSize);
+    cudaDeviceProp deviceProp;
+    cudaGetDeviceProperties(&deviceProp, dev);
+  int blockSize = std::min((size_t)deviceProp.maxThreadsPerBlock,g[l].N*g[l].N);
+  dim3 threadsPerBlock(blockSize);
+  dim3 blocksPerGrid(g[l].N*g[l].N/blockSize);
 
   for (size_t r = 0; r < relaxations; r++)
     {
@@ -97,17 +133,21 @@ void applyJacobi(gridLevel* g, size_t l, size_t relaxations)
       jacobi<<<blocksPerGrid, threadsPerBlock>>>(g[l].h*g[l].h, g[l].gU, g[l].gUn, g[l].gf, g[l].N);
       checkCUDAError("Error running Jacobi Kernel");
       cudaDeviceSynchronize();
-	  
+      
     }
   
-  cudaMemcpy(g[l].U, g[l].gU, sizeof(double)*g[l].N*g[l].N, cudaMemcpyDeviceToHost); checkCUDAError("Error copying U back");
-  cudaMemcpy(g[l].Un, g[l].gUn, sizeof(double)*g[l].N*g[l].N, cudaMemcpyDeviceToHost); checkCUDAError("Error copying Un back");
-  cudaMemcpy(g[l].f, g[l].gf, sizeof(double)*g[l].N*g[l].N, cudaMemcpyDeviceToHost); checkCUDAError("Error copying f back"); 
-  cudaDeviceSynchronize();
-
 
   auto t1 = std::chrono::system_clock::now();
   smoothingTime[l] += std::chrono::duration<double>(t1-t0).count();
+}
+
+
+__global__
+void residual(double h2, double* U, double* Res, double* f, size_t N)
+{
+  size_t j = blockIdx.x*blockDim.x+threadIdx.x;
+  if (j % N == 0 || j % N == N - 1 || j / N == 0 || j / N == N - 1) return;
+  Res[j] = f[j] + (U[j-N] + U[j+N] - 4*U[j] + U[j-1] + U[j+1]) * h2;
 }
 
 void calculateResidual(gridLevel* g, size_t l)
@@ -115,28 +155,83 @@ void calculateResidual(gridLevel* g, size_t l)
   auto t0 = std::chrono::system_clock::now();
 
   double h2 = 1.0 / pow(g[l].h,2);
-
-  size_t N = g[l].N;
-  for (size_t i = 1; i < N-1; i++)
-	for (size_t j = i*N+1; j < i*N+N-1; j++)
-      g[l].Res[j] = g[l].f[j] + (g[l].U[j-N] + g[l].U[j+N] - 4*g[l].U[j] + g[l].U[j-1] + g[l].U[j+1]) * h2;
+  
+    cudaDeviceProp deviceProp;
+    cudaGetDeviceProperties(&deviceProp, dev);
+  int blockSize = std::min((size_t)deviceProp.maxThreadsPerBlock,g[l].N*g[l].N);
+  dim3 threadsPerBlock(blockSize);
+  dim3 blocksPerGrid(g[l].N*g[l].N/blockSize);
+  
+  residual<<<blocksPerGrid, threadsPerBlock>>>(h2, g[l].gU, g[l].gRes, g[l].gf, g[l].N);
+  checkCUDAError("Error running Residual Kernel");
+  cudaDeviceSynchronize();
 
   auto t1 = std::chrono::system_clock::now();
   residualTime[l] += std::chrono::duration<double>(t1-t0).count();
 }
 
+//parallel reduction adapted from https://developer.download.nvidia.com/assets/cuda/files/reduction.pdf by Mark Harris
+template <unsigned int blockSize>
+__device__ void warpReduce(volatile double *sdata, unsigned int tid) {
+if (blockSize >= 64) sdata[tid] += sdata[tid + 32];
+if (blockSize >= 32) sdata[tid] += sdata[tid + 16];
+if (blockSize >= 16) sdata[tid] += sdata[tid + 8];
+if (blockSize >= 8) sdata[tid] += sdata[tid + 4];
+if (blockSize >= 4) sdata[tid] += sdata[tid + 2];
+if (blockSize >= 2) sdata[tid] += sdata[tid + 1];
+}
+template <unsigned int blockSize>
+__global__ void reduce6(double *g_idata, double *g_odata, unsigned int n) {
+extern __shared__ double sdata[];
+unsigned int tid = threadIdx.x;
+unsigned int i = blockIdx.x*(blockSize*2) + tid;
+unsigned int gridSize = blockSize*2*gridDim.x;
+sdata[tid] = 0;
+while (i < n) { sdata[tid] += g_idata[i] + g_idata[i+blockSize]; i += gridSize; }
+__syncthreads();
+if (blockSize >= 2048) { if (tid < 1024) { sdata[tid] += sdata[tid + 1024]; } __syncthreads(); }
+if (blockSize >= 1024) { if (tid < 512) { sdata[tid] += sdata[tid + 512]; } __syncthreads(); }
+if (blockSize >= 512) { if (tid < 256) { sdata[tid] += sdata[tid + 256]; } __syncthreads(); }
+if (blockSize >= 256) { if (tid < 128) { sdata[tid] += sdata[tid + 128]; } __syncthreads(); }
+if (blockSize >= 128) { if (tid < 64) { sdata[tid] += sdata[tid + 64]; } __syncthreads(); }
+if (tid < 32) warpReduce(sdata, tid);
+if (tid == 0) g_odata[blockIdx.x] = sdata[0];
+}
+
+__global__
+void square( double* Res)
+{
+  size_t j = blockIdx.x*blockDim.x+threadIdx.x;
+  Res[j] = Res[j] * Res[j];
+}
+
+
 void calculateL2Norm(gridLevel* g, size_t l)
 {
   auto t0 = std::chrono::system_clock::now();
 
+  
+  
+  
   double tmp = 0.0;
-
+  square<<<g[l].blocksPerGrid, g[l].threadsPerBlock>>>(g[l].gRes);
+  checkCUDAError("Error running Square Kernel");
+  cudaDeviceSynchronize();
+reduce6<<<g[l].blocksPerGrid, g[l].threadsPerBlock, g[l].N * g[l].N>>>(g[l].gRes, g[l].gResSum)
+  checkCUDAError("Error running Reduction Kernel");
+  
+  cudaMemcpy(g[l].ResSum, g[l].gResSum, sizeof(double)*g[l].N*g[l].N, cudaMemcpyDeviceToHost); checkCUDAError("Error copying sum results back");
+  cudaDeviceSynchronize();
+for (size_t i = 0; i < g[l].blocksPerGrid; i ++){
+  tmp+= g[l].ResSum[i];
+}
+  /*
   for (size_t i = 0; i < g[l].N*g[l].N; i++)
       g[l].Res[i] = g[l].Res[i]*g[l].Res[i];
 
   for (size_t i = 0; i < g[l].N*g[l].N; i++)
       tmp += g[l].Res[i];
-
+*/
   g[l].L2Norm = sqrt(tmp);
   g[l].L2NormDiff = fabs(g[l].L2NormPrev - g[l].L2Norm);
   g[l].L2NormPrev = g[l].L2Norm;
@@ -152,9 +247,9 @@ void applyRestriction(gridLevel* g, size_t l)
   size_t N = g[l-1].N;
   for (size_t i = 1; i < g[l].N-1; i++)
     for (size_t j = 1; j < g[l].N-1; j++)
-      g[l].f[i*g[l].N+j] = ( 1.0*( g[l-1].Res[(2*i-1)*N+2*j-1] + g[l-1].Res[(2*i-1)*N+2*j+1] + g[l-1].Res[(2*i+1)*N+2*j-1]   + g[l-1].Res[(2*i+1)*N+2*j+1] )   +
-		       2.0*( g[l-1].Res[(2*i-1)*N+2*j]   + g[l-1].Res[(2*i)*N+2*j-1]   + g[l-1].Res[(2*i+1)*N+2*j]     + g[l-1].Res[(2*i)*N+2*j+1] ) +
-		       4.0*( g[l-1].Res[(2*i)*N+2*j] ) ) * 0.0625;
+      g[l].f[i*N/2+j] = ( 1.0*( g[l-1].Res[(2*i-1)*N+2*j-1] + g[l-1].Res[(2*i-1)*N+2*j+1] + g[l-1].Res[(2*i+1)*N+2*j-1]   + g[l-1].Res[(2*i+1)*N+2*j+1] )   +
+               2.0*( g[l-1].Res[(2*i-1)*N+2*j]   + g[l-1].Res[(2*i)*N+2*j-1]   + g[l-1].Res[(2*i+1)*N+2*j]     + g[l-1].Res[(2*i)*N+2*j+1] ) +
+               4.0*( g[l-1].Res[(2*i)*N+2*j] ) ) * 0.0625;
 
   
   for (size_t i = 0; i < g[l].N*g[l].N; i++)// Resetting U vector for the coarser level before smoothing -- Find out if this is really necessary.
@@ -223,20 +318,30 @@ gridLevel* generateInitialConditions(size_t N0, size_t gridCount)
     {
       g[i].N = pow(2, N0-i) + 1;
       g[i].h = 1.0/(g[i].N-1);
+	  
+    cudaDeviceProp deviceProp;
+    cudaGetDeviceProperties(&deviceProp, dev);
+  int blockSize = std::min((size_t)deviceProp.maxThreadsPerBlock,g[i].N*g[i].N);
+  g[i].threadsPerBlock = (blockSize);
+  g[i].blocksPerGrid = (g[i].N*g[i].N/blockSize);
 
       g[i].U   = (double*) malloc(sizeof(double) * g[i].N * g[i].N);
       g[i].Un  = (double*) malloc(sizeof(double) * g[i].N * g[i].N);
       g[i].Res = (double*) malloc(sizeof(double) * g[i].N * g[i].N);
       g[i].f   = (double*) malloc(sizeof(double) * g[i].N * g[i].N);
+      g[i].ResSum = (double*) malloc(sizeof(double) * g[i].blocksPerGrid);
 
       cudaMalloc(&g[i].gU, sizeof(double) * g[i].N * g[i].N); checkCUDAError("Error allocating gU");
       cudaMalloc(&g[i].gUn, sizeof(double) * g[i].N * g[i].N); checkCUDAError("Error allocating gUn");
       cudaMalloc(&g[i].gRes, sizeof(double) * g[i].N * g[i].N); checkCUDAError("Error allocating gRes");
       cudaMalloc(&g[i].gf, sizeof(double) * g[i].N * g[i].N); checkCUDAError("Error allocating gf");
-	  
+      cudaMalloc(&g[i].gResSum, sizeof(double) * g[i].blocksPerGrid); checkCUDAError("Error allocating gResSum");
+      
       g[i].L2Norm = 0.0;
       g[i].L2NormPrev = std::numeric_limits<double>::max();
       g[i].L2NormDiff = std::numeric_limits<double>::max();
+	  
+	  
     }
 
   // Initial Guess
@@ -252,20 +357,20 @@ gridLevel* generateInitialConditions(size_t N0, size_t gridCount)
   for (size_t i = 0; i < g[0].N; i++)
     for (size_t j = 0; j < g[0].N; j++)
       {
-	double h = 1.0/(g[0].N-1);
-	double x = i*h;
-	double y = j*h;
+    double h = 1.0/(g[0].N-1);
+    double x = i*h;
+    double y = j*h;
 
-	g[0].f[i*g[0].N+j] = 0.0;
+    g[0].f[i*g[0].N+j] = 0.0;
 
-	for (size_t c = 0; c < __p.nCandles; c++)
-	  {
-	    double c3 = pars[c*4  + 0]; // x0
-	    double c4 = pars[c*4  + 1]; // y0
-	    double c1 = pars[c*4  + 2]; c1 *= 100000;// intensity
-	    double c2 = pars[c*4  + 3]; c2 *= 0.01;// Width
-	    g[0].f[i*g[0].N+j] += c1*exp(-(pow(c4 - y, 2) + pow(c3 - x, 2)) / c2);
-	  }
+    for (size_t c = 0; c < __p.nCandles; c++)
+      {
+        double c3 = pars[c*4  + 0]; // x0
+        double c4 = pars[c*4  + 1]; // y0
+        double c1 = pars[c*4  + 2]; c1 *= 100000;// intensity
+        double c2 = pars[c*4  + 3]; c2 *= 0.01;// Width
+        g[0].f[i*g[0].N+j] += c1*exp(-(pow(c4 - y, 2) + pow(c3 - x, 2)) / c2);
+      }
       }
 
   return g;
@@ -283,6 +388,7 @@ void freeGrids(gridLevel* g, size_t gridCount)
       cudaFree(g[i].gUn);
       cudaFree(g[i].gf);
       cudaFree(g[i].gRes);
+      cudaFree(g[i].gResSum);
     }
   free(g);
 }
