@@ -67,14 +67,13 @@ void checkCUDAError(const char *msg)
     }
 }
 
-__global__
-void jacobi(gridLevel* g, size_t l, double* U, double* Un, size_t N)
+//__global__
+void jacobi(double h2, double* U, double* Un, double* f, size_t N)
 {
-  int index = blockIdx.x * blockDim.x + threadIdx.x;
-  int stride = blockDim.x * gridDim.x;
+  //int index = blockIdx.x * blockDim.x + threadIdx.x;
+  //int stride = blockDim.x * gridDim.x;
   double h1 = 0.25;
-  double h2 = g[l].h*g[l].h;
-  for (size_t i = 1; i < g[l].N-1; i++)
+  for (size_t i = 1; i < N-1; i++)
 	for (size_t j = i*N+1; j < i*N+N-1; j++) // Perform a Jacobi Iteration
 	  U[j] = (Un[j-N] + Un[j+N] + Un[j-1] + Un[j+1] + f[j]*h2)*h1;
 }
@@ -83,13 +82,24 @@ void applyJacobi(gridLevel* g, size_t l, size_t relaxations)
 {
   auto t0 = std::chrono::system_clock::now();
 
+
+  cudaMemcpy(g[l].gU, g[l].U, sizeof(double)*g[l].N*g[l].N, cudaMemcpyHostToDevice); checkCUDAError("Error copying U");
+  cudaMemcpy(g[l].gUn, g[l].Un, sizeof(double)*g[l].N*g[l].N, cudaMemcpyHostToDevice); checkCUDAError("Error copying Un");
+  cudaMemcpy(g[l].gf, g[l].f, sizeof(double)*g[l].N*g[l].N, cudaMemcpyHostToDevice); checkCUDAError("Error copying f"); 
+
   for (size_t r = 0; r < relaxations; r++)
     {
       double* tmp = g[l].Un; g[l].Un = g[l].U; g[l].U = tmp;
       tmp = g[l].gUn; g[l].gUn = g[l].gU; g[l].gU = tmp;
-	  cudaDeviceSynchronize();
+      jacobi(g[l].h*g[l].h, g[l].U, g[l].Un, g[l].f, g[l].N);
+      //cudaDeviceSynchronize();
+	  
+    }
+  
+  cudaMemcpy(g[l].U, g[l].gU, sizeof(double)*g[l].N*g[l].N, cudaMemcpyDeviceToHost); checkCUDAError("Error copying U back");
+  cudaMemcpy(g[l].Un, g[l].gUn, sizeof(double)*g[l].N*g[l].N, cudaMemcpyDeviceToHost); checkCUDAError("Error copying Un back");
+  cudaMemcpy(g[l].f, g[l].gf, sizeof(double)*g[l].N*g[l].N, cudaMemcpyDeviceToHost); checkCUDAError("Error copying f back"); 
 
-	}
 
   auto t1 = std::chrono::system_clock::now();
   smoothingTime[l] += std::chrono::duration<double>(t1-t0).count();
@@ -134,7 +144,7 @@ void calculateL2Norm(gridLevel* g, size_t l)
 void applyRestriction(gridLevel* g, size_t l)
 {
   auto t0 = std::chrono::system_clock::now();
-	size_t N = g[l].N
+  size_t N = g[l].N;
   for (size_t i = 1; i < g[l].N-1; i++)
     for (size_t j = 1; j < g[l].N-1; j++)
       g[l].f[i*N+j] = ( 1.0*( g[l-1].Res[(2*i-1)*N+2*j-1] + g[l-1].Res[(2*i-1)*N+2*j+1] + g[l-1].Res[(2*i+1)*N+2*j-1]   + g[l-1].Res[(2*i+1)*N+2*j+1] )   +
