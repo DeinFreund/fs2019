@@ -67,19 +67,29 @@ void checkCUDAError(const char *msg)
     }
 }
 
+__global__
+void jacobi(gridLevel* g, size_t l, double* U, double* Un, size_t N)
+{
+  int index = blockIdx.x * blockDim.x + threadIdx.x;
+  int stride = blockDim.x * gridDim.x;
+  double h1 = 0.25;
+  double h2 = g[l].h*g[l].h;
+  for (size_t i = 1; i < g[l].N-1; i++)
+	for (size_t j = i*N+1; j < i*N+N-1; j++) // Perform a Jacobi Iteration
+	  U[j] = (Un[j-N] + Un[j+N] + Un[j-1] + Un[j+1] + f[j]*h2)*h1;
+}
+
 void applyJacobi(gridLevel* g, size_t l, size_t relaxations)
 {
   auto t0 = std::chrono::system_clock::now();
 
-  double h1 = 0.25;
-  double h2 = g[l].h*g[l].h;
   for (size_t r = 0; r < relaxations; r++)
     {
-      double** tmp = g[l].Un; g[l].Un = g[l].U; g[l].U = tmp;
-      for (size_t i = 1; i < g[l].N-1; i++)
-	for (size_t j = 1; j < g[l].N-1; j++) // Perform a Jacobi Iteration
-	  g[l].U[i][j] = (g[l].Un[i-1][j] + g[l].Un[i+1][j] + g[l].Un[i][j-1] + g[l].Un[i][j+1] + g[l].f[i][j]*h2)*h1;
-    }
+      double* tmp = g[l].Un; g[l].Un = g[l].U; g[l].U = tmp;
+      tmp = g[l].gUn; g[l].gUn = g[l].gU; g[l].gU = tmp;
+	  cudaDeviceSynchronize();
+
+	}
 
   auto t1 = std::chrono::system_clock::now();
   smoothingTime[l] += std::chrono::duration<double>(t1-t0).count();
@@ -91,9 +101,10 @@ void calculateResidual(gridLevel* g, size_t l)
 
   double h2 = 1.0 / pow(g[l].h,2);
 
-  for (size_t i = 1; i < g[l].N-1; i++)
-    for (size_t j = 1; j < g[l].N-1; j++)
-      g[l].Res[i][j] = g[l].f[i][j] + (g[l].U[i-1][j] + g[l].U[i+1][j] - 4*g[l].U[i][j] + g[l].U[i][j-1] + g[l].U[i][j+1]) * h2;
+  size_t N = g[l].N;
+  for (size_t i = 1; i < N-1; i++)
+	for (size_t j = i*N+1; j < i*N+N-1; j++)
+      g[l].Res[j] = g[l].f[j] + (g[l].U[j-N] + g[l].U[j+N] - 4*g[l].U[j] + g[l].U[j-1] + g[l].U[j+1]) * h2;
 
   auto t1 = std::chrono::system_clock::now();
   residualTime[l] += std::chrono::duration<double>(t1-t0).count();
@@ -105,13 +116,11 @@ void calculateL2Norm(gridLevel* g, size_t l)
 
   double tmp = 0.0;
 
-  for (size_t i = 0; i < g[l].N; i++)
-    for (size_t j = 0; j < g[l].N; j++)
-      g[l].Res[i][j] = g[l].Res[i][j]*g[l].Res[i][j];
+  for (size_t i = 0; i < g[l].N*g[l].N; i++)
+      g[l].Res[i] = g[l].Res[i]*g[l].Res[i];
 
-  for (size_t i = 0; i < g[l].N; i++)
-    for (size_t j = 0; j < g[l].N; j++)
-      tmp += g[l].Res[i][j];
+  for (size_t i = 0; i < g[l].N*g[l].N; i++)
+      tmp += g[l].Res[i];
 
   g[l].L2Norm = sqrt(tmp);
   g[l].L2NormDiff = fabs(g[l].L2NormPrev - g[l].L2Norm);
@@ -125,16 +134,16 @@ void calculateL2Norm(gridLevel* g, size_t l)
 void applyRestriction(gridLevel* g, size_t l)
 {
   auto t0 = std::chrono::system_clock::now();
-
+	size_t N = g[l].N
   for (size_t i = 1; i < g[l].N-1; i++)
     for (size_t j = 1; j < g[l].N-1; j++)
-      g[l].f[i][j] = ( 1.0*( g[l-1].Res[2*i-1][2*j-1] + g[l-1].Res[2*i-1][2*j+1] + g[l-1].Res[2*i+1][2*j-1]   + g[l-1].Res[2*i+1][2*j+1] )   +
-		       2.0*( g[l-1].Res[2*i-1][2*j]   + g[l-1].Res[2*i][2*j-1]   + g[l-1].Res[2*i+1][2*j]     + g[l-1].Res[2*i][2*j+1] ) +
-		       4.0*( g[l-1].Res[2*i][2*j] ) ) * 0.0625;
+      g[l].f[i*N+j] = ( 1.0*( g[l-1].Res[(2*i-1)*N+2*j-1] + g[l-1].Res[(2*i-1)*N+2*j+1] + g[l-1].Res[(2*i+1)*N+2*j-1]   + g[l-1].Res[(2*i+1)*N+2*j+1] )   +
+		       2.0*( g[l-1].Res[(2*i-1)*N+2*j]   + g[l-1].Res[(2*i)*N+2*j-1]   + g[l-1].Res[(2*i+1)*N+2*j]     + g[l-1].Res[(2*i)*N+2*j+1] ) +
+		       4.0*( g[l-1].Res[(2*i)*N+2*j] ) ) * 0.0625;
 
-  for (size_t i = 0; i < g[l].N; i++)
-    for (size_t j = 0; j < g[l].N; j++) // Resetting U vector for the coarser level before smoothing -- Find out if this is really necessary.
-      g[l].U[i][j] = 0;
+  
+  for (size_t i = 0; i < g[l].N*g[l].N; i++)// Resetting U vector for the coarser level before smoothing -- Find out if this is really necessary.
+      g[l].U[i] = 0;
 
   auto t1 = std::chrono::system_clock::now();
   restrictionTime[l] += std::chrono::duration<double>(t1-t0).count();
@@ -146,19 +155,19 @@ void applyProlongation(gridLevel* g, size_t l)
 
   for (size_t i = 1; i < g[l].N-1; i++)
     for (size_t j = 1; j < g[l].N-1; j++)
-      g[l-1].U[2*i][2*j] += g[l].U[i][j];
+      g[l-1].U[2*i*g[l-1].N+2*j] += g[l].U[i*g[l].N+j];
 
   for (size_t i = 1; i < g[l].N; i++)
     for (size_t j = 1; j < g[l].N-1; j++)
-      g[l-1].U[2*i-1][2*j] += ( g[l].U[i-1][j] + g[l].U[i][j] ) *0.5;
+      g[l-1].U[(2*i-1)*g[l-1].N+2*j] += ( g[l].U[(i-1)*g[l].N+j] + g[l].U[i*g[l].N+j] ) *0.5;
 
   for (size_t i = 1; i < g[l].N-1; i++)
     for (size_t j = 1; j < g[l].N; j++)
-      g[l-1].U[2*i][2*j-1] += ( g[l].U[i][j-1] + g[l].U[i][j] ) *0.5;
+      g[l-1].U[(2*i)*g[l-1].N+2*j-1] += ( g[l].U[i*g[l].N+j-1] + g[l].U[i*g[l].N+j] ) *0.5;
 
   for (size_t i = 1; i < g[l].N; i++)
     for (size_t j = 1; j < g[l].N; j++)
-      g[l-1].U[2*i-1][2*j-1] += ( g[l].U[i-1][j-1] + g[l].U[i-1][j] + g[l].U[i][j-1] + g[l].U[i][j] ) *0.25;
+      g[l-1].U[(2*i-1)*g[l-1].N+2*j-1] += ( g[l].U[(i-1)*g[l].N+j-1] + g[l].U[(i-1)*g[l].N+j] + g[l].U[i*g[l].N+j-1] + g[l].U[i*g[l].N+j] ) *0.25;
 
   auto t1 = std::chrono::system_clock::now();
   prolongTime[l] += std::chrono::duration<double>(t1-t0).count();
@@ -200,29 +209,29 @@ gridLevel* generateInitialConditions(size_t N0, size_t gridCount)
       g[i].N = pow(2, N0-i) + 1;
       g[i].h = 1.0/(g[i].N-1);
 
-      g[i].U   = (double**) malloc(sizeof(double*) * g[i].N); for (size_t j = 0; j < g[i].N ; j++) g[i].U[j]   = (double*) malloc(sizeof(double) * g[i].N);
-      g[i].Un  = (double**) malloc(sizeof(double*) * g[i].N); for (size_t j = 0; j < g[i].N ; j++) g[i].Un[j]  = (double*) malloc(sizeof(double) * g[i].N);
-      g[i].Res = (double**) malloc(sizeof(double*) * g[i].N); for (size_t j = 0; j < g[i].N ; j++) g[i].Res[j] = (double*) malloc(sizeof(double) * g[i].N);
-      g[i].f   = (double**) malloc(sizeof(double*) * g[i].N); for (size_t j = 0; j < g[i].N ; j++) g[i].f[j]   = (double*) malloc(sizeof(double) * g[i].N);
+      g[i].U   = (double*) malloc(sizeof(double) * g[i].N * g[i].N);
+      g[i].Un  = (double*) malloc(sizeof(double) * g[i].N * g[i].N);
+      g[i].Res = (double*) malloc(sizeof(double) * g[i].N * g[i].N);
+      g[i].f   = (double*) malloc(sizeof(double) * g[i].N * g[i].N);
 
-      g[i].gU   = (double**) cudaMalloc(sizeof(double*) * g[i].N); for (size_t j = 0; j < g[i].N ; j++) g[i].U[j]   = (double*) cudaMalloc(sizeof(double) * g[i].N);
-      g[i].gUn  = (double**) cudaMalloc(sizeof(double*) * g[i].N); for (size_t j = 0; j < g[i].N ; j++) g[i].Un[j]  = (double*) cudaMalloc(sizeof(double) * g[i].N);
-      g[i].gRes = (double**) cudaMalloc(sizeof(double*) * g[i].N); for (size_t j = 0; j < g[i].N ; j++) g[i].Res[j] = (double*) cudaMalloc(sizeof(double) * g[i].N);
-      g[i].gf   = (double**) cudaMalloc(sizeof(double*) * g[i].N); for (size_t j = 0; j < g[i].N ; j++) g[i].f[j]   = (double*) cudaMalloc(sizeof(double) * g[i].N);
-
+      cudaMalloc(&g[i].gU, sizeof(double) * g[i].N * g[i].N); checkCUDAError("Error allocating gU");
+      cudaMalloc(&g[i].gUn, sizeof(double) * g[i].N * g[i].N); checkCUDAError("Error allocating gUn");
+      cudaMalloc(&g[i].gRes, sizeof(double) * g[i].N * g[i].N); checkCUDAError("Error allocating gRes");
+      cudaMalloc(&g[i].gf, sizeof(double) * g[i].N * g[i].N); checkCUDAError("Error allocating gf");
+	  
       g[i].L2Norm = 0.0;
       g[i].L2NormPrev = std::numeric_limits<double>::max();
       g[i].L2NormDiff = std::numeric_limits<double>::max();
     }
 
   // Initial Guess
-  for (size_t i = 0; i < g[0].N; i++) for (size_t j = 0; j < g[0].N; j++) g[0].U[i][j] = 1.0;
+  for (size_t i = 0; i < g[0].N; i++) for (size_t j = 0; j < g[0].N*g[0].N; j++) g[0].U[j] = 1.0;
 
   // Boundary Conditions
-  for (size_t i = 0; i < g[0].N; i++) g[0].U[0][i]        = 0.0;
-  for (size_t i = 0; i < g[0].N; i++) g[0].U[g[0].N-1][i] = 0.0;
-  for (size_t i = 0; i < g[0].N; i++) g[0].U[i][0]        = 0.0;
-  for (size_t i = 0; i < g[0].N; i++) g[0].U[i][g[0].N-1] = 0.0;
+  for (size_t i = 0; i < g[0].N; i++) g[0].U[i]        = 0.0;
+  for (size_t i = 0; i < g[0].N; i++) g[0].U[(g[0].N-1)*g[0].N + i] = 0.0;
+  for (size_t i = 0; i < g[0].N; i++) g[0].U[i*g[0].N]        = 0.0;
+  for (size_t i = 0; i < g[0].N; i++) g[0].U[i*g[0].N+g[0].N-1] = 0.0;
 
   // F
   for (size_t i = 0; i < g[0].N; i++)
@@ -232,7 +241,7 @@ gridLevel* generateInitialConditions(size_t N0, size_t gridCount)
 	double x = i*h;
 	double y = j*h;
 
-	g[0].f[i][j] = 0.0;
+	g[0].f[i*g[0].N+j] = 0.0;
 
 	for (size_t c = 0; c < __p.nCandles; c++)
 	  {
@@ -240,7 +249,7 @@ gridLevel* generateInitialConditions(size_t N0, size_t gridCount)
 	    double c4 = pars[c*4  + 1]; // y0
 	    double c1 = pars[c*4  + 2]; c1 *= 100000;// intensity
 	    double c2 = pars[c*4  + 3]; c2 *= 0.01;// Width
-	    g[0].f[i][j] += c1*exp(-(pow(c4 - y, 2) + pow(c3 - x, 2)) / c2);
+	    g[0].f[i*g[0].N+j] += c1*exp(-(pow(c4 - y, 2) + pow(c3 - x, 2)) / c2);
 	  }
       }
 
@@ -251,12 +260,14 @@ void freeGrids(gridLevel* g, size_t gridCount)
 {
   for (size_t i = 0; i < gridCount; i++)
     {
-      for (size_t j = 0; j < g[i].N ; j++) free(g[i].U[j]);
-      for (size_t j = 0; j < g[i].N ; j++) free(g[i].f[j]);
-      for (size_t j = 0; j < g[i].N ; j++) free(g[i].Res[j]);
       free(g[i].U);
+      free(g[i].Un);
       free(g[i].f);
       free(g[i].Res);
+      cudaFree(g[i].gU);
+      cudaFree(g[i].gUn);
+      cudaFree(g[i].gf);
+      cudaFree(g[i].gRes);
     }
   free(g);
 }
