@@ -117,13 +117,13 @@ void checkCUDAError(const char *msg)
     }
 }
 
-__global__
+/*__global__
 void jacobi2(double h2, double* U, double* Un, double* f, size_t N)
 {
   size_t j = blockIdx.x*blockDim.x+threadIdx.x;
   if (j % N == 0 || j % N == N - 1 || j / N == 0 || j / N == N - 1) return;
   U[j] = (Un[j-N] + Un[j+N] + Un[j-1] + Un[j+1] + f[j]*h2)*0.25;
-}
+  }*/
 
 __global__
 void jacobi(double h2, double* U, double* Un, double* f, size_t N)
@@ -180,7 +180,7 @@ void applyJacobi(gridLevel* g, size_t l, size_t relaxations)
   smoothingTime[l] += std::chrono::duration<double>(t1-t0).count();
 }
 
-
+/*
 __global__
 void residual(double h2, double* U, double* Res, double* f, size_t N)
 {
@@ -189,7 +189,7 @@ void residual(double h2, double* U, double* Res, double* f, size_t N)
   Res[j] = f[j] + (U[j-N] + U[j+N] - 4*U[j] + U[j-1] + U[j+1]) * h2;
 }
 
-/*
+
 void calculateResidual(gridLevel* g, size_t l)
 {
   auto t0 = std::chrono::system_clock::now();
@@ -226,7 +226,7 @@ void calculateResidual(gridLevel* g, size_t l)
 }
 
 //*/
-
+/*
 //parallel reduction adapted from https://developer.download.nvidia.com/assets/cuda/files/reduction.pdf by Mark Harris
 template <unsigned int blockSize>
 __device__ void warpReduce(volatile double *sdata, unsigned int tid) {
@@ -290,7 +290,7 @@ void square( double* Res)
   size_t j = blockIdx.x*blockDim.x+threadIdx.x;
   Res[j] = Res[j] * Res[j];
 }
-
+*/
 
 void calculateL2Norm(gridLevel* g, size_t l)
 {
