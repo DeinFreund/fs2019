@@ -44,6 +44,8 @@ void applyRestriction(gridLevel* g, size_t l);
 void applyProlongation(gridLevel* g, size_t l);
 void calculateL2Norm(gridLevel* g, size_t l);
 void printTimings(size_t gridCount);
+void checkCUDAError(const char *msg);
+
 
 double* smoothingTime;
 double* residualTime;

@@ -17,10 +17,10 @@ pointsInfo __p;
 int main(int argc, char* argv[])
 {
  double tolerance = 1e-0; // L2 Difference Tolerance before reaching convergence.
- size_t N0 = 10; // 2^N0 + 1 elements per side
+ size_t N0 = 5; // 2^N0 + 1 elements per side
 
  // Multigrid parameters -- Find the best configuration!
- size_t gridCount       = N0-1;     // Number of Multigrid levels to use
+ size_t gridCount       = 1;     // Number of Multigrid levels to use
  size_t downRelaxations = 5; // Number of Relaxations before restriction
  size_t upRelaxations   = 0;   // Number of Relaxations after prolongation
 
