@@ -20,6 +20,7 @@ void copyToDevice(gridLevel * g, size_t s,size_t gridCount){
   
   for (size_t l = s; l < gridCount; l++){
     cudaMemcpy(g[l].gU, g[l].U, sizeof(double)*g[l].N*g[l].N, cudaMemcpyHostToDevice); checkCUDAError("Error copying U");
+    cudaMemcpy(g[l].gRes, g[l].Res, sizeof(double)*g[l].N*g[l].N, cudaMemcpyHostToDevice); checkCUDAError("Error copying Res");
     cudaMemcpy(g[l].gUn, g[l].Un, sizeof(double)*g[l].N*g[l].N, cudaMemcpyHostToDevice); checkCUDAError("Error copying Un");
     cudaMemcpy(g[l].gf, g[l].f, sizeof(double)*g[l].N*g[l].N, cudaMemcpyHostToDevice); checkCUDAError("Error copying f"); 
     cudaDeviceSynchronize();
@@ -32,6 +33,7 @@ void copyToHost(gridLevel * g,size_t s , size_t gridCount){
   
   for (size_t l = s; l < gridCount; l++){
     cudaMemcpy(g[l].U, g[l].gU, sizeof(double)*g[l].N*g[l].N, cudaMemcpyDeviceToHost); checkCUDAError("Error copying U back");
+    cudaMemcpy(g[l].Res, g[l].gRes, sizeof(double)*g[l].N*g[l].N, cudaMemcpyDeviceToHost); checkCUDAError("Error copying Res back");
     cudaMemcpy(g[l].Un, g[l].gUn, sizeof(double)*g[l].N*g[l].N, cudaMemcpyDeviceToHost); checkCUDAError("Error copying Un back");
     cudaMemcpy(g[l].f, g[l].gf, sizeof(double)*g[l].N*g[l].N, cudaMemcpyDeviceToHost); checkCUDAError("Error copying f back"); 
     cudaDeviceSynchronize();
@@ -66,9 +68,9 @@ int main(int argc, char* argv[])
   
       copyToDevice(g, 0,1);
       applyJacobi(g, 0, downRelaxations); // Relaxing the finest grid first
-      copyToHost(g, 0,1);
       calculateResidual(g, 0); // Calculating Initial Residual
-
+    copyToHost(g, 0,1);
+  
 
       for (size_t grid = 1; grid < gridCount; grid++) // Going down the V-Cycle
 	{
@@ -76,9 +78,9 @@ int main(int argc, char* argv[])
 	  applyRestriction(g, grid); // Restricting the residual to the coarser grid's solution vector (f)
 	  copyToDevice(g,grid, grid+1);
 	  applyJacobi(g, grid, downRelaxations); // Smoothing coarser level
-	  copyToHost(g, grid, grid+1);
 	  calculateResidual(g, grid); // Calculating Coarse Grid Residual
-	  //  copyToDevice(g, gridCount);
+	  copyToHost(g, grid,grid+1);
+  	  //  copyToDevice(g, gridCount);
 	}
 
       for (size_t grid = gridCount-1; grid > 0; grid--) // Going up the V-Cycle
@@ -91,7 +93,8 @@ int main(int argc, char* argv[])
 	  
 	}
       //copyToHost(g, gridCount);
-      
+      copyToDevice(g, 0, 1);
+	  
       calculateL2Norm(g, 0); // Calculating Residual L2 Norm
     }  // Multigrid solver end
 
@@ -143,12 +146,12 @@ void applyJacobi(gridLevel* g, size_t l, size_t relaxations)
   smoothingTime[l] += std::chrono::duration<double>(t1-t0).count();
 }
 
-/*
+///*
 __global__
 void residual(double h2, double* U, double* Res, double* f, size_t N)
 {
   size_t j = blockIdx.x*blockDim.x+threadIdx.x;
-  if (j % N == 0 || j % N == N - 1 || j / N == 0 || j / N == N - 1) return;
+  if (j % N == 0 || j % N == N - 1 || j / N == 0 || j / N >= N - 1) return;
   Res[j] = f[j] + (U[j-N] + U[j+N] - 4*U[j] + U[j-1] + U[j+1]) * h2;
 }
 
@@ -168,7 +171,7 @@ void calculateResidual(gridLevel* g, size_t l)
   residualTime[l] += std::chrono::duration<double>(t1-t0).count();
 }
 //*/
-
+/*
 void calculateResidual(gridLevel* g, size_t l)
 {
   auto t0 = std::chrono::system_clock::now();
