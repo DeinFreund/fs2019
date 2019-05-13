@@ -62,11 +62,12 @@ int main(int argc, char* argv[])
   
   
   //copyToDevice(g, gridCount);
-  
+copyToDevice(g, 0,1);
+        
+
   while (g[0].L2NormDiff > tolerance)  // Multigrid solver start
     {
   
-      copyToDevice(g, 0,1);
       applyJacobi(g, 0, downRelaxations); // Relaxing the finest grid first
       calculateResidual(g, 0); // Calculating Initial Residual	  
 	  
@@ -81,20 +82,22 @@ int main(int argc, char* argv[])
 	  calculateResidual(g, grid); // Calculating Coarse Grid Residual
 	  //  copyToDevice(g, gridCount);
 	}
-      copyToHost(g, 0,gridCount);
+      //copyToHost(g, 0,gridCount);
   	 
 
       for (size_t grid = gridCount-1; grid > 0; grid--) // Going up the V-Cycle
 	{
 	  //copyToHost(g, gridCount);
+	  //copyToDevice(g, grid, grid+2);
+	  
 	  applyProlongation(g, grid); // Prolonging solution for coarser level up to finer level
 	  //copyToDevice(g, grid, grid+1);
 	  applyJacobi(g, grid, upRelaxations); // Smoothing finer level
-	  copyToHost(g, grid, grid+1);
+	  //copyToHost(g, grid, grid+1);
 	  
 	}
       //copyToHost(g, gridCount);
-      copyToDevice(g, 0, 1);
+      //copyToDevice(g, 0, 1);
 	  
       calculateL2Norm(g, 0); // Calculating Residual L2 Norm
 
@@ -419,10 +422,22 @@ void applyProlongation(gridLevel* g, size_t l)
     for (size_t j = 1; j < g[l].N; j++)
       g[l-1].U[(2*i-1)*g[l-1].N+2*j-1] += ( g[l].U[(i-1)*g[l].N+j-1] + g[l].U[(i-1)*g[l].N+j] + g[l].U[i*g[l].N+j-1] + g[l].U[i*g[l].N+j] ) *0.25;
 //*/
-///*
+  ///*
   prolong<<<g[l].blocksPerGrid, g[l].threadsPerBlock>>>( g[l-1].gU, g[l].gU, g[l-1].N, g[l].N);
   cudaDeviceSynchronize();
   checkCUDAError("Error running Prolongation Kernel");
+  //*/
+  //cudaMemcpy(g[l-1].U, g[l-1].gU, sizeof(double)*g[l-1].N*g[l-1].N, cudaMemcpyDeviceToHost); checkCUDAError("Error copying U back");
+
+  /*  
+cudaMemcpy(g[l-1].Un, g[l-1].gU, sizeof(double)*g[l-1].N*g[l-1].N, cudaMemcpyDeviceToHost); checkCUDAError("Error copying U back");
+  cudaDeviceSynchronize();
+  /*
+  for (size_t i = 1; i < g[l-1].N* g[l-1].N; i++){
+    if (fabs(g[l-1].U[i] - g[l-1].Un[i]) > 0.00001)
+      std::cerr << "wrong at " << i  << " " << g[l-1].Un[i] << " instead of " << g[l-1].U[i] << std::endl;
+      }
+  //exit(0);
   //*/
   auto t1 = std::chrono::system_clock::now();
   prolongTime[l] += std::chrono::duration<double>(t1-t0).count();
