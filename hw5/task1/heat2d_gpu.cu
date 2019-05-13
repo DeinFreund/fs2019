@@ -321,7 +321,7 @@ void calculateL2Norm(gridLevel* g, size_t l)
   L2NormTime[l] += std::chrono::duration<double>(t1-t0).count();
 }
 
-
+/*
 __global__
 void restrict(double* Res, double* f, size_t N)
 {
@@ -333,7 +333,7 @@ void restrict(double* Res, double* f, size_t N)
 			     2.0*( Res[(2*i-1)*N+2*j]   + Res[(2*i)*N+2*j-1]   + Res[(2*i+1)*N+2*j]     + Res[(2*i)*N+2*j+1] ) +
 			     4.0*( Res[(2*i)*N+2*j] ) ) * 0.0625;
 }
-
+//*/
 void applyRestriction(gridLevel* g, size_t l)
 {
   auto t0 = std::chrono::system_clock::now();
@@ -351,15 +351,15 @@ void applyRestriction(gridLevel* g, size_t l)
   cudaDeviceSynchronize();
   checkCUDAError("Error running Restriction Kernel");
   //*/
-  /*for (size_t i = 0; i < g[l].N*g[l].N; i++)// Resetting U vector for the coarser level before smoothing -- Find out if this is really necessary.
+  for (size_t i = 0; i < g[l].N*g[l].N; i++)// Resetting U vector for the coarser level before smoothing -- Find out if this is really necessary.
     g[l].U[i] = 0;
-*/
+  //*/
 	
   auto t1 = std::chrono::system_clock::now();
   restrictionTime[l] += std::chrono::duration<double>(t1-t0).count();
 }
 
-
+/*
 __global__
 void prolong(double* U, double* Uold, size_t N, size_t Nold)
 {
@@ -378,7 +378,7 @@ void prolong(double* U, double* Uold, size_t N, size_t Nold)
   if (!(i == 0 || i >= N|| j == 0 || j >= N))
       U[(2*i-1)*N+2*j-1] += ( Uold[(i-1)*Nold+j-1] + Uold[(i-1)*Nold+j] + Uold[i*Nold+j-1] + Uold[i*Nold+j] ) *0.25;
 }
-
+//*/
 
 void applyProlongation(gridLevel* g, size_t l)
 {
