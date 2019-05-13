@@ -68,28 +68,27 @@ int main(int argc, char* argv[])
   
       copyToDevice(g, 0,1);
       applyJacobi(g, 0, downRelaxations); // Relaxing the finest grid first
-      calculateResidual(g, 0); // Calculating Initial Residual
-    copyToHost(g, 0,1);
-  
-
+      calculateResidual(g, 0); // Calculating Initial Residual	  
+	  
       for (size_t grid = 1; grid < gridCount; grid++) // Going down the V-Cycle
 	{
 	  //copyToHost(g, gridCount);
 	  
 	  applyRestriction(g, grid); // Restricting the residual to the coarser grid's solution vector (f)
+	  //copyToDevice(g, grid,grid+1);
 
-	  copyToDevice(g,grid-1, grid+1);	  
 	  applyJacobi(g, grid, downRelaxations); // Smoothing coarser level
 	  calculateResidual(g, grid); // Calculating Coarse Grid Residual
-	  copyToHost(g, grid,grid+1);
-  	  //  copyToDevice(g, gridCount);
+	  //  copyToDevice(g, gridCount);
 	}
+      copyToHost(g, 0,gridCount);
+  	 
 
       for (size_t grid = gridCount-1; grid > 0; grid--) // Going up the V-Cycle
 	{
 	  //copyToHost(g, gridCount);
 	  applyProlongation(g, grid); // Prolonging solution for coarser level up to finer level
-	  copyToDevice(g, grid, grid+1);
+	  //copyToDevice(g, grid, grid+1);
 	  applyJacobi(g, grid, upRelaxations); // Smoothing finer level
 	  copyToHost(g, grid, grid+1);
 	  
@@ -98,7 +97,10 @@ int main(int argc, char* argv[])
       copyToDevice(g, 0, 1);
 	  
       calculateL2Norm(g, 0); // Calculating Residual L2 Norm
-    }  // Multigrid solver end
+
+printf("L2Norm: %.4f\n",  g[0].L2Norm);
+    
+  }  // Multigrid solver end
 
   //copyToHost(g, gridCount);
 	
@@ -342,9 +344,9 @@ __global__
 void restrict(double* Res, double* f, size_t N, size_t Nold)
 {
   size_t k = blockIdx.x*blockDim.x+threadIdx.x;
-  size_t i = k / N;
-  size_t j = k % N;
-  if (i == 0 || i >= N - 1 || j == 0 || j >= N - 1) return;
+  size_t i = k / Nold;
+  size_t j = k % Nold;
+  if (i == 0 || i >= Nold - 1 || j == 0 || j >= Nold - 1) return;
       f[i*Nold+j] = ( 1.0*( Res[(2*i-1)*N+2*j-1] + Res[(2*i-1)*N+2*j+1] + Res[(2*i+1)*N+2*j-1]   + Res[(2*i+1)*N+2*j+1] )   +
 			     2.0*( Res[(2*i-1)*N+2*j]   + Res[(2*i)*N+2*j-1]   + Res[(2*i+1)*N+2*j]     + Res[(2*i)*N+2*j+1] ) +
 			     4.0*( Res[(2*i)*N+2*j] ) ) * 0.0625;
@@ -355,15 +357,15 @@ void applyRestriction(gridLevel* g, size_t l)
   auto t0 = std::chrono::system_clock::now();
   size_t N = g[l-1].N;
  
-  // /*
+   /*
  for (size_t i = 1; i < g[l].N-1; i++)
     for (size_t j = 1; j < g[l].N-1; j++)
       g[l].f[i*g[l].N+j] = ( 1.0*( g[l-1].Res[(2*i-1)*N+2*j-1] + g[l-1].Res[(2*i-1)*N+2*j+1] + g[l-1].Res[(2*i+1)*N+2*j-1]   + g[l-1].Res[(2*i+1)*N+2*j+1] )   +
 			     2.0*( g[l-1].Res[(2*i-1)*N+2*j]   + g[l-1].Res[(2*i)*N+2*j-1]   + g[l-1].Res[(2*i+1)*N+2*j]     + g[l-1].Res[(2*i)*N+2*j+1] ) +
 			     4.0*( g[l-1].Res[(2*i)*N+2*j] ) ) * 0.0625;
 //*/
-  /*
-  restrict<<<g[l].blocksPerGrid, g[l].threadsPerBlock>>>( g[l-1].gRes, g[l].gf, N, g[l].N);
+  ///*
+  restrict<<<g[l].blocksPerGrid, g[l].threadsPerBlock>>>( g[l-1].gRes, g[l].gf, g[l-1].N, g[l].N);
   cudaDeviceSynchronize();
   checkCUDAError("Error running Restriction Kernel");
   //*/
@@ -376,23 +378,23 @@ void applyRestriction(gridLevel* g, size_t l)
   restrictionTime[l] += std::chrono::duration<double>(t1-t0).count();
 }
 
-/*
+///*
 __global__
 void prolong(double* U, double* Uold, size_t N, size_t Nold)
 {
   size_t k = blockIdx.x*blockDim.x+threadIdx.x;
-  size_t i = k / N;
-  size_t j = k % N;
-  if (!(i == 0 || i >= N - 1 || j == 0 || j >= N - 1))
+  size_t i = k / Nold;
+  size_t j = k % Nold;
+  if (!(i == 0 || i >= Nold - 1 || j == 0 || j >= Nold - 1))
       U[2*i*N+2*j] += Uold[i*Nold+j];
 
-  if (!(i == 0 || i >= N || j == 0 || j >= N - 1))
+  if (!(i == 0 || i >= Nold || j == 0 || j >= Nold - 1))
       U[(2*i-1)*N+2*j] += ( Uold[(i-1)*Nold+j] + Uold[i*Nold+j] ) *0.5;
 
-  if (!(i == 0 || i >= N - 1 || j == 0 || j >= N))
+  if (!(i == 0 || i >= Nold - 1 || j == 0 || j >= Nold))
       U[(2*i)*N+2*j-1] += ( Uold[i*Nold+j-1] + Uold[i*Nold+j] ) *0.5;
 
-  if (!(i == 0 || i >= N|| j == 0 || j >= N))
+  if (!(i == 0 || i >= Nold|| j == 0 || j >= Nold))
       U[(2*i-1)*N+2*j-1] += ( Uold[(i-1)*Nold+j-1] + Uold[(i-1)*Nold+j] + Uold[i*Nold+j-1] + Uold[i*Nold+j] ) *0.25;
 }
 //*/
@@ -400,7 +402,7 @@ void prolong(double* U, double* Uold, size_t N, size_t Nold)
 void applyProlongation(gridLevel* g, size_t l)
 {
   auto t0 = std::chrono::system_clock::now();
-  ///*
+  /*
   for (size_t i = 1; i < g[l].N-1; i++)
     for (size_t j = 1; j < g[l].N-1; j++)
       g[l-1].U[2*i*g[l-1].N+2*j] += g[l].U[i*g[l].N+j];
@@ -417,7 +419,7 @@ void applyProlongation(gridLevel* g, size_t l)
     for (size_t j = 1; j < g[l].N; j++)
       g[l-1].U[(2*i-1)*g[l-1].N+2*j-1] += ( g[l].U[(i-1)*g[l].N+j-1] + g[l].U[(i-1)*g[l].N+j] + g[l].U[i*g[l].N+j-1] + g[l].U[i*g[l].N+j] ) *0.25;
 //*/
-/*
+///*
   prolong<<<g[l].blocksPerGrid, g[l].threadsPerBlock>>>( g[l-1].gU, g[l].gU, g[l-1].N, g[l].N);
   cudaDeviceSynchronize();
   checkCUDAError("Error running Prolongation Kernel");
