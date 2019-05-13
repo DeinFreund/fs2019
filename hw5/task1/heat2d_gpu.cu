@@ -91,9 +91,6 @@ int main(int argc, char * argv[]) {
     }
 
     calculateL2Norm(g, 0); // Calculating Residual L2 Norm
-
-    printf("L2Norm: %.4f\n", g[0].L2Norm);
-
   } // Multigrid solver end
 
   copyToHost(g, 0, gridCount);
@@ -333,7 +330,6 @@ void restrict(double * Res, double * f, size_t N, size_t Nold) {
 
 void applyRestriction(gridLevel * g, size_t l) {
   auto t0 = std::chrono::system_clock::now();
-  size_t N = g[l - 1].N;
 
   restrict<<<g[l].blocksPerGrid, g[l].threadsPerBlock>>>(g[l - 1].gRes, g[l].gf, g[l - 1].N, g[l].N);
   cudaDeviceSynchronize();
