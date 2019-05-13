@@ -250,13 +250,17 @@ void runReduction(int dimGrid, int dimBlock, int smemSize, double * d_idata, dou
       reduce5< 1><<< dimGrid, dimBlock, smemSize >>>(d_idata, d_odata); break;
     }
 }
+*/
 __global__
-void square( double* Res)
+void square( double* Res, int N)
 {
   size_t j = blockIdx.x*blockDim.x+threadIdx.x;
+  if (j >= N) return;
+  //printf("res was %f\n", Res[j]);
   Res[j] = Res[j] * Res[j];
+  // printf("res is %f\n", Res[j]);
 }
-*/
+
 
 void calculateL2Norm(gridLevel* g, size_t l)
 {
@@ -264,13 +268,12 @@ void calculateL2Norm(gridLevel* g, size_t l)
 
   
   
-  
   double tmp = 0.0;
-  //square<<<g[l].blocksPerGrid, g[l].threadsPerBlock>>>(g[l].gRes);
+  square<<<g[l].blocksPerGrid, g[l].threadsPerBlock>>>(g[l].gRes, g[l].N * g[l].N);
   checkCUDAError("Error running Square Kernel");
   cudaDeviceSynchronize();
   //g[l].threadsPerBlock><<<g[l].blocksPerGrid, g[l].threadsPerBlock, g[l].N * g[l].N
-  //cudaMemcpy(g[l].Res, g[l].gRes, sizeof(double)*g[l].N * g[l].N, cudaMemcpyDeviceToHost); checkCUDAError("Error copying res squares back");
+  cudaMemcpy(g[l].Res, g[l].gRes, sizeof(double)*g[l].N * g[l].N, cudaMemcpyDeviceToHost); checkCUDAError("Error copying res squares back");
   cudaDeviceSynchronize();
   
   /*runReduction(g[l].blocksPerGrid, g[l].threadsPerBlock, g[l].N * g[l].N, g[l].gRes, g[l].gResSum);
@@ -281,7 +284,7 @@ void calculateL2Norm(gridLevel* g, size_t l)
     for (size_t i = 0; i < g[l].blocksPerGrid; i ++){
     tmp+= g[l].ResSum[i];
     }*/
-  ///*
+  /*
   for (size_t i = 0; i < g[l].N*g[l].N; i++){
     g[l].Res[i] = g[l].Res[i]*g[l].Res[i];
     // std::cerr << g[l].Res[i] << std::endl;
