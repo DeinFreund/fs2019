@@ -75,8 +75,10 @@ int main(int argc, char* argv[])
       for (size_t grid = 1; grid < gridCount; grid++) // Going down the V-Cycle
 	{
 	  //copyToHost(g, gridCount);
+	  
 	  applyRestriction(g, grid); // Restricting the residual to the coarser grid's solution vector (f)
-	  copyToDevice(g,grid, grid+1);
+
+	  copyToDevice(g,grid-1, grid+1);	  
 	  applyJacobi(g, grid, downRelaxations); // Smoothing coarser level
 	  calculateResidual(g, grid); // Calculating Coarse Grid Residual
 	  copyToHost(g, grid,grid+1);
@@ -128,12 +130,26 @@ void jacobi(double h2, double* U, double* Un, double* f, size_t N)
   if (j % N == 0 || j % N == N - 1 || j / N == 0 || j / N >= N - 1) return;
   U[j] = (Un[j-N] + Un[j+N] + Un[j-1] + Un[j+1] + f[j]*h2)*0.25;
   }
+__global__
+void jacobiSimple(double h2, double* U,  double* f, size_t N)
+{
+  size_t j = blockIdx.x*blockDim.x+threadIdx.x;
+  if (j / N >= N) return;
+  if (j % N == 0 || j % N == N - 1 || j / N == 0 || j / N >= N - 1) U[j] = 0;
+  else U[j] = (f[j]*h2)*0.25;
+}
 
 void applyJacobi(gridLevel* g, size_t l, size_t relaxations)
 {
   auto t0 = std::chrono::system_clock::now();
+  if (l > 0 ){
+    jacobiSimple<<<g[l].blocksPerGrid, g[l].threadsPerBlock>>>(g[l].h*g[l].h, g[l].gU, g[l].gf, g[l].N);
+    checkCUDAError("Error running Jacobi Simple Kernel");
+    cudaDeviceSynchronize();
+    
+  }
 
-  for (size_t r = 0; r < relaxations; r++)
+  for (size_t r = (l > 0); r < relaxations; r++)
     {
       double* tmp = g[l].Un; g[l].Un = g[l].U; g[l].U = tmp;
       tmp = g[l].gUn; g[l].gUn = g[l].gU; g[l].gU = tmp;
@@ -321,15 +337,15 @@ void calculateL2Norm(gridLevel* g, size_t l)
   L2NormTime[l] += std::chrono::duration<double>(t1-t0).count();
 }
 
-/*
+///*
 __global__
-void restrict(double* Res, double* f, size_t N)
+void restrict(double* Res, double* f, size_t N, size_t Nold)
 {
   size_t k = blockIdx.x*blockDim.x+threadIdx.x;
   size_t i = k / N;
   size_t j = k % N;
   if (i == 0 || i >= N - 1 || j == 0 || j >= N - 1) return;
-      f[i*N/2+j] = ( 1.0*( Res[(2*i-1)*N+2*j-1] + Res[(2*i-1)*N+2*j+1] + Res[(2*i+1)*N+2*j-1]   + Res[(2*i+1)*N+2*j+1] )   +
+      f[i*Nold+j] = ( 1.0*( Res[(2*i-1)*N+2*j-1] + Res[(2*i-1)*N+2*j+1] + Res[(2*i+1)*N+2*j-1]   + Res[(2*i+1)*N+2*j+1] )   +
 			     2.0*( Res[(2*i-1)*N+2*j]   + Res[(2*i)*N+2*j-1]   + Res[(2*i+1)*N+2*j]     + Res[(2*i)*N+2*j+1] ) +
 			     4.0*( Res[(2*i)*N+2*j] ) ) * 0.0625;
 }
@@ -339,18 +355,19 @@ void applyRestriction(gridLevel* g, size_t l)
   auto t0 = std::chrono::system_clock::now();
   size_t N = g[l-1].N;
  
-  ///*
+  // /*
  for (size_t i = 1; i < g[l].N-1; i++)
     for (size_t j = 1; j < g[l].N-1; j++)
-      g[l].f[i*N/2+j] = ( 1.0*( g[l-1].Res[(2*i-1)*N+2*j-1] + g[l-1].Res[(2*i-1)*N+2*j+1] + g[l-1].Res[(2*i+1)*N+2*j-1]   + g[l-1].Res[(2*i+1)*N+2*j+1] )   +
+      g[l].f[i*g[l].N+j] = ( 1.0*( g[l-1].Res[(2*i-1)*N+2*j-1] + g[l-1].Res[(2*i-1)*N+2*j+1] + g[l-1].Res[(2*i+1)*N+2*j-1]   + g[l-1].Res[(2*i+1)*N+2*j+1] )   +
 			     2.0*( g[l-1].Res[(2*i-1)*N+2*j]   + g[l-1].Res[(2*i)*N+2*j-1]   + g[l-1].Res[(2*i+1)*N+2*j]     + g[l-1].Res[(2*i)*N+2*j+1] ) +
 			     4.0*( g[l-1].Res[(2*i)*N+2*j] ) ) * 0.0625;
 //*/
   /*
-  restrict<<<g[l].blocksPerGrid, g[l].threadsPerBlock>>>( g[l-1].gRes, g[l].gf, N);
+  restrict<<<g[l].blocksPerGrid, g[l].threadsPerBlock>>>( g[l-1].gRes, g[l].gf, N, g[l].N);
   cudaDeviceSynchronize();
   checkCUDAError("Error running Restriction Kernel");
   //*/
+ /*
   for (size_t i = 0; i < g[l].N*g[l].N; i++)// Resetting U vector for the coarser level before smoothing -- Find out if this is really necessary.
     g[l].U[i] = 0;
   //*/
