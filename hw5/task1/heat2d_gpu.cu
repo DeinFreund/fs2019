@@ -44,7 +44,7 @@ void copyToHost(gridLevel * g,size_t s , size_t gridCount){
 int main(int argc, char* argv[])
 {
   double tolerance = 1e-0; // L2 Difference Tolerance before reaching convergence.
-  size_t N0 = 7; // 2^N0 + 1 elements per side
+  size_t N0 = 10; // 2^N0 + 1 elements per side
 
   // Multigrid Parameters -- Find the best configuration!
   size_t gridCount       = N0-1;     // Number of Multigrid levels to use
@@ -192,7 +192,7 @@ void calculateResidual(gridLevel* g, size_t l)
 }
 
 //*/
-/*
+
 //parallel reduction adapted from https://developer.download.nvidia.com/assets/cuda/files/reduction.pdf by Mark Harris
 template <unsigned int blockSize>
 __device__ void warpReduce(volatile double *sdata, unsigned int tid) {
@@ -250,7 +250,7 @@ void runReduction(int dimGrid, int dimBlock, int smemSize, double * d_idata, dou
       reduce5< 1><<< dimGrid, dimBlock, smemSize >>>(d_idata, d_odata); break;
     }
 }
-*/
+
 __global__
 void square( double* Res, int N)
 {
@@ -273,23 +273,42 @@ void calculateL2Norm(gridLevel* g, size_t l)
   checkCUDAError("Error running Square Kernel");
   cudaDeviceSynchronize();
   //g[l].threadsPerBlock><<<g[l].blocksPerGrid, g[l].threadsPerBlock, g[l].N * g[l].N
-  cudaMemcpy(g[l].Res, g[l].gRes, sizeof(double)*g[l].N * g[l].N, cudaMemcpyDeviceToHost); checkCUDAError("Error copying res squares back");
-  cudaDeviceSynchronize();
+  //cudaMemcpy(g[l].Res, g[l].gRes, sizeof(double)*g[l].N * g[l].N, cudaMemcpyDeviceToHost); checkCUDAError("Error copying res squares back");
+  //cudaDeviceSynchronize();
   
-  /*runReduction(g[l].blocksPerGrid, g[l].threadsPerBlock, g[l].N * g[l].N, g[l].gRes, g[l].gResSum);
+  int blocks = g[l].N*g[l].N/g[l].threadsPerBlock/2;
+  runReduction(blocks, g[l].threadsPerBlock, 8192, g[l].gRes, g[l].gResSum);
+    cudaDeviceSynchronize();
     checkCUDAError("Error running Reduction Kernel");
   
-    cudaMemcpy(g[l].ResSum, g[l].gResSum, sizeof(double)*g[l].blocksPerGrid, cudaMemcpyDeviceToHost); checkCUDAError("Error copying sum results back");
+    //std::cerr<<blocks << " blocks " << std::endl;
+    cudaMemcpy(g[l].ResSum, g[l].gResSum, sizeof(double)*blocks, cudaMemcpyDeviceToHost); checkCUDAError("Error copying sum results back");
     cudaDeviceSynchronize();
-    for (size_t i = 0; i < g[l].blocksPerGrid; i ++){
+    for (size_t i = 0; i < blocks; i ++){
     tmp+= g[l].ResSum[i];
-    }*/
+    }
+    int start = blocks*g[l].threadsPerBlock * 2;
+    int threads = 32;
+    blocks = (g[l].N*g[l].N-start)/threads/2;
+    if (blocks > 0){
+    std::cerr<<"missed " << g[l].N*g[l].N-start << " making extra " << blocks << std::endl;
+    runReduction(blocks, threads, 2*g[l].threadsPerBlock, g[l].gRes+start, g[l].gResSum);
+  cudaDeviceSynchronize();
+   checkCUDAError("Error running Reduction Kernel");
+    
+    cudaMemcpy(g[l].ResSum, g[l].gResSum, sizeof(double)*blocks, cudaMemcpyDeviceToHost); checkCUDAError("Error copying sum results back");
+    cudaDeviceSynchronize();
+    for (size_t i = 0; i < blocks; i ++){
+      tmp+= g[l].ResSum[i];
+      }
+    }
+  
   /*
   for (size_t i = 0; i < g[l].N*g[l].N; i++){
     g[l].Res[i] = g[l].Res[i]*g[l].Res[i];
     // std::cerr << g[l].Res[i] << std::endl;
   }
-  //*/
+  /*
   for (size_t i = 0; i < g[l].N*g[l].N; i++)
     tmp += g[l].Res[i];
   //*/
@@ -390,13 +409,13 @@ gridLevel* generateInitialConditions(size_t N0, size_t gridCount)
       g[i].Un  = (double*) malloc(sizeof(double) * g[i].N * g[i].N);
       g[i].Res = (double*) malloc(sizeof(double) * g[i].N * g[i].N);
       g[i].f   = (double*) malloc(sizeof(double) * g[i].N * g[i].N);
-      g[i].ResSum = (double*) malloc(sizeof(double) * g[i].blocksPerGrid);
+      g[i].ResSum = (double*) malloc(sizeof(double) * std::max(g[i].blocksPerGrid, 100));
 
       cudaMalloc(&g[i].gU, sizeof(double) * g[i].N * g[i].N); checkCUDAError("Error allocating gU");
       cudaMalloc(&g[i].gUn, sizeof(double) * g[i].N * g[i].N); checkCUDAError("Error allocating gUn");
       cudaMalloc(&g[i].gRes, sizeof(double) * g[i].N * g[i].N); checkCUDAError("Error allocating gRes");
       cudaMalloc(&g[i].gf, sizeof(double) * g[i].N * g[i].N); checkCUDAError("Error allocating gf");
-      cudaMalloc(&g[i].gResSum, sizeof(double) * g[i].blocksPerGrid); checkCUDAError("Error allocating gResSum");
+      cudaMalloc(&g[i].gResSum, sizeof(double) *  std::max(g[i].blocksPerGrid, 100)); checkCUDAError("Error allocating gResSum");
       
       g[i].L2Norm = 0.0;
       g[i].L2NormPrev = std::numeric_limits<double>::max();
@@ -445,6 +464,7 @@ void freeGrids(gridLevel* g, size_t gridCount)
       free(g[i].Un);
       free(g[i].f);
       free(g[i].Res);
+      free(g[i].ResSum);
       cudaFree(g[i].gU);
       cudaFree(g[i].gUn);
       cudaFree(g[i].gf);
