@@ -1,6 +1,6 @@
 CXXFLAGS = -O3 -g -std=c++11 -Wall -Wfatal-errors
 BINARIES = heat2d_cpu heat2d_mpi
-MPICXX = mpic++
+MPICXX = mpicxx
 
 .SECONDARY:
 .PHONY: all

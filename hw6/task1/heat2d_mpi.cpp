@@ -8,10 +8,11 @@
 #include <stdio.h>
 #include <math.h>
 #include <limits>
-#include "heat2d_cpu.hpp"
+#include "heat2d_mpi.hpp"
 #include "string.h"
 #include <chrono>
 #include <mpi.h>
+#include <iostream>
 
 pointsInfo __p;
 
@@ -33,15 +34,15 @@ MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 int ndim = 2; 
 int periodic[2] = {0,0};
 int dimensions[2] = {0,0};
-MPI_Dims_create(size, 2, dimensions)
+ MPI_Dims_create(size, 2, dimensions);
 MPI_Cart_create(MPI_COMM_WORLD,ndim,dimensions,periodic,1,&comm2d);
 MPI_Cart_coords(comm2d,rank,ndim,coord_2d);
 MPI_Cart_rank(comm2d,coord_2d,&rank_2d);
 MPI_Cart_shift(comm2d, 0, 1, &left, &right);
-MPI_Cart_shift(comm2d, 1, 1, &down, &up);
+ MPI_Cart_shift(comm2d, 1, 1, &up, &down);
 
  double tolerance = 1e-0; // L2 Difference Tolerance before reaching convergence.
- size_t N0 = 3; // 2^N0 + 1 elements per side
+ size_t N0 = 10; // 2^N0 + 1 elements per side
 
  // Multigrid parameters -- Find the best configuration!
  size_t gridCount       = 1;     // Number of Multigrid levels to use
@@ -52,35 +53,90 @@ MPI_Cart_shift(comm2d, 1, 1, &down, &up);
 
 
  N = g[0].N;
- p = sqrt(rankCount);
+ p = sqrt(size);
  n = N / p;
 
- MPI_Type_contiguous(n, MPI_DOUBLE, &colType);
- MPI_Type_vector (n, 1, n, MPI_DOUBLE, &rowType);
+ if (rank == 0)std::cout << "Splitting the " << N << "x" << N << " matrix into " << size << " " << n << "x" << n << " matrices." << std::endl;
+
+ MPI_Type_contiguous(n, MPI_DOUBLE, &rowType);
+ MPI_Type_vector (n, 1, n, MPI_DOUBLE, &colType);
  MPI_Type_commit(&rowType);
  MPI_Type_commit(&colType);
 
  MPI_Datatype subMatrixType;
  MPI_Type_contiguous(n*n, MPI_DOUBLE, &subMatrixType);
  MPI_Type_commit(&subMatrixType);
- MPI_Scatter(g[l].U, 1, subMatrixType, g[l].Ul, 1, subMatrixType, 0, comm2d);
- //Ul, fl
+ 
+ for (int y = 0; y < n; y++){
+   for (int x = 0 ; x < n; x++){
+     int u = x + coord_2d[0] * n;
+     int v = y + coord_2d[1] * n;
+     g[0].Ul[y*n+x] = g[0].U[v * N + u];
+     g[0].Unl[y*n+x] = g[0].Un[v * N + u];
+     g[0].Resl[y*n+x] = g[0].Res[v * N + u];
+     g[0].fl[y*n+x] = g[0].f[v * N + u];
+   }
+ }
+//Ul, fl
+/*
+  if (rank == 0)  std::cout << "Target is " << std::endl;
 
+   for (int i = 0; i < size; i++){
+     MPI_Barrier(comm2d);
+     if (i == rank){
+       std::cout << "Submatrix " << rank << std::endl;
+       for (int y = 0; y < n; y++){
+	 for (int x = 0; x < n; x++){
+	   std::cout << g[0].fl[y*n+x] << " ";
+	 }
+	 std::cout << std::endl;
+       }
+     }
+   }MPI_Barrier(comm2d);
+*/
+
+ int b = 0;
  auto startTime = std::chrono::system_clock::now();
- while (g[0].L2NormDiff > tolerance)  // Multigrid solver start
- {
-  applyJacobi(g, 0, downRelaxations); // Relaxing the finest grid first
+  while (g[0].L2NormDiff > tolerance)  // Multigrid solver start
+ //for (int b = 0; b < 3; b++) 
+  {
+    b++;
+    /*
+  if (rank == 0)  std::cout << "Step " << b << std::endl;
+
+   for (int i = 0; i < size; i++){
+     MPI_Barrier(comm2d);
+     if (i == rank){
+       std::cout << "Submatrix " << rank << std::endl;
+       for (int y = 0; y < n; y++){
+	 for (int x = 0; x < n; x++){
+	   std::cout << g[0].Ul[y*n+x] << " ";
+	 }
+	 std::cout << std::endl;
+       }
+     }
+   }MPI_Barrier(comm2d);
+   // */
+  
+
+   applyJacobi(g, 0, downRelaxations); // Relaxing the finest grid first
   calculateResidual(g, 0); // Calculating Initial Residual
 
   calculateL2Norm(g, 0); // Calculating Residual L2 Norm
+
+  MPI_Bcast(&g[0].L2NormDiff, 1, MPI_DOUBLE, 0, comm2d);
+  
  }  // Multigrid solver en
 
- MPI_Gather(g[l].U, 1, subMatrixType, g[l].Ul, 1, subMatrixType, 0, comm2d);
-
+ MPI_Barrier(comm2d);
+     
+ 
  auto endTime = std::chrono::system_clock::now();
  totalTime = std::chrono::duration<double>(endTime-startTime).count();
- printTimings(gridCount);
- printf("L2Norm: %.4f\n",  g[0].L2Norm);
+ if (rank == 0){ 
+   printTimings(gridCount);
+   printf("L2Norm: %.4f\n",  g[0].L2Norm);
+ }
  freeGrids(g, gridCount);
  return 0;
 }
@@ -93,52 +149,75 @@ void applyJacobi(gridLevel* g, size_t l, size_t relaxations)
  double h2 = g[l].h*g[l].h;
  for (size_t r = 0; r < relaxations; r++)
  {
-  double** tmp = g[l].Unl; g[l].Unl = g[l].Ul; g[l].Ul = tmp;
+  double* tmp = g[l].Unl; g[l].Unl = g[l].Ul; g[l].Ul = tmp;
 
   bool hasUp, hasDown, hasLeft, hasRight;
-  hasUp = 1;
-  hasDown = 1;
-  hasLeft = 1;
-  hasRight = 1;
-  
-  if (hasLeft) MPI_Irecv(g[l].left, 1, colType, left, comm2d);
-  if (hasRight) MPI_Irecv(g[l].right, 1, colType, right, comm2d);
-  if (hasUp) MPI_Irecv(g[l].up, 1, rowType, up, comm2d);
-  if (hasDown)   MPI_Irecv(g[l].down, 1, rowType, down, comm2d);
+  hasUp = coord_2d[1] > 0;
+  hasDown = coord_2d[1] < p -1;
+  hasLeft = coord_2d[0] > 0;
+  hasRight = coord_2d[0] < p - 1;
 
-  if (hasLeft) MPI_Isend(g[l].Unl, 1, colType, left, comm2d);
-  if (hasRight) MPI_Isend(g[l].Unl + (n-1), 1, colType, right, comm2d);
-  if (hasUp) MPI_Isend(g[l].Unl, 1, rowType, up, comm2d);
-  if (hasDown) MPI_Isend(g[l].Unl + n * (n-1), 1, rowType, down, comm2d);
+  //if (r == 0) std::cout << "Rank " << rank << " has left, right, up, down: " << hasLeft << " " << hasRight << " " << hasUp << " " << hasDown << std::endl;
+  
+  MPI_Request reqs[8];
+  int rcnt = 0;
+  if (hasLeft) MPI_Irecv(g[l].left, n, MPI_DOUBLE, left, 1, comm2d, &(reqs[rcnt++]));
+  if (hasRight) MPI_Irecv(g[l].right, n, MPI_DOUBLE, right, 2, comm2d, &(reqs[rcnt++]));
+  if (hasUp) MPI_Irecv(g[l].up, n, MPI_DOUBLE, up , 3, comm2d, &(reqs[rcnt++]));
+  if (hasDown)   MPI_Irecv(g[l].down, n, MPI_DOUBLE, down, 4, comm2d, &(reqs[rcnt++]));
+
+  if (hasLeft) MPI_Isend(g[l].Unl, 1, colType, left, 2,comm2d, &(reqs[rcnt++]));
+  if (hasRight) MPI_Isend(g[l].Unl + (n-1), 1, colType, right, 1, comm2d, &(reqs[rcnt++]));
+  if (hasUp) MPI_Isend(g[l].Unl, 1, rowType, up, 4, comm2d, &(reqs[rcnt++]));
+  if (hasDown) MPI_Isend(g[l].Unl + n * (n-1), 1, rowType, down, 3, comm2d, &(reqs[rcnt++]));
 
   for (size_t i = 1; i < n-1; i++)
    for (size_t k = 1; k < n-1; k++){
      int j = i * n + k;
      g[l].Ul[j] = (g[l].Unl[j - n] + g[l].Unl[j + n] + g[l].Unl[j - 1] + g[l].Unl[j + 1] + g[l].fl[j] * h2) * 0.25;
    }
-   MPI_Waitall();
+
+  MPI_Status stats[8];
+  MPI_Waitall(rcnt, reqs, stats);
 
    //left
    if (hasLeft)
-   for (int j = 0; j < n*n; j+= n){
+   for (int j = n; j < n*n-n; j+= n){
      g[l].Ul[j] = (g[l].Unl[j - n] + g[l].Unl[j + n] + g[l].left[j/n] + g[l].Unl[j + 1] + g[l].fl[j] * h2) * 0.25;
    }
    //right
    if (hasRight)
-   for (int j = n-1; j < n*n; j+= n){
+   for (int j = n-1+n; j < n*n-n; j+= n){
      g[l].Ul[j] = (g[l].Unl[j - n] + g[l].Unl[j + n] + g[l].Unl[j - 1] + g[l].right[j/n] + g[l].fl[j] * h2) * 0.25;
    }
    //up
    if (hasUp)
-   for (int j = 0; j < n; j++){
+   for (int j = 1; j < n-1; j++){
      g[l].Ul[j] = (g[l].up[j] + g[l].Unl[j + n] + g[l].Unl[j - 1] + g[l].Unl[j + 1] + g[l].fl[j] * h2) * 0.25;
    }
    //down
    if (hasDown)
-   for (int j = n*n-n; j < n*n; j++){
+     for (int j = n*n-n+1; j < n*n-1; j++){
      g[l].Ul[j] = (g[l].Unl[j - n] + g[l].down[j - n*n + n] + g[l].Unl[j - 1] + g[l].Unl[j + 1] + g[l].fl[j] * h2) * 0.25;
    }
+   if (hasUp && hasRight){
+     int j = n - 1;
+     g[l].Ul[j] = (g[l].up[n-1] + g[l].Unl[j + n] + g[l].Unl[j - 1] + g[l].right[0] + g[l].fl[j] * h2) * 0.25;
+   }
+   if (hasRight && hasDown){
+     int j = n * n - 1;
+     g[l].Ul[j] = (g[l].Unl[j - n] + g[l].down[j - n*n + n] + g[l].Unl[j - 1] + g[l].right[n - 1] + g[l].fl[j] * h2) * 0.25;
+   }
+   if (hasDown && hasLeft){
+     int j = n * n - n;
+     g[l].Ul[j] = (g[l].Unl[j - n] + g[l].down[j - n*n + n] + g[l].left[n-1] + g[l].Unl[j + 1] + g[l].fl[j] * h2) * 0.25;
+   }
+   if (hasLeft && hasUp){
+     int j = 0;
+     g[l].Ul[j] = (g[l].up[0] + g[l].Unl[j + n] + g[l].left[j/n] + g[l].Unl[j + 1] + g[l].fl[j] * h2) * 0.25;
+   }
 
+ }
  auto t1 = std::chrono::system_clock::now();
  smoothingTime[l] += std::chrono::duration<double>(t1-t0).count();
 }
@@ -149,11 +228,75 @@ void calculateResidual(gridLevel* g, size_t l)
 
  double h2 = 1.0 / pow(g[l].h,2);
 
- for (size_t i = 1; i < n-1; i++)
+
+
+  bool hasUp, hasDown, hasLeft, hasRight;
+  hasUp = coord_2d[1] > 0;
+  hasDown = coord_2d[1] < p -1;
+  hasLeft = coord_2d[0] > 0;
+  hasRight = coord_2d[0] < p - 1;
+
+  //if (r == 0) std::cout << "Rank " << rank << " has left, right, up, down: " << hasLeft << " " << hasRight << " " << hasUp << " " << hasDown << std::endl;
+  
+  MPI_Request reqs[8];
+  int rcnt = 0;
+
+  if (hasLeft) MPI_Irecv(g[l].left, n, MPI_DOUBLE, left, 1, comm2d, &(reqs[rcnt++]));
+  if (hasRight) MPI_Irecv(g[l].right, n, MPI_DOUBLE, right, 2, comm2d, &(reqs[rcnt++]));
+  if (hasUp) MPI_Irecv(g[l].up, n, MPI_DOUBLE, up , 3, comm2d, &(reqs[rcnt++]));
+  if (hasDown)   MPI_Irecv(g[l].down, n, MPI_DOUBLE, down, 4, comm2d, &(reqs[rcnt++]));
+
+  if (hasLeft) MPI_Isend(g[l].Ul, 1, colType, left, 2,comm2d, &(reqs[rcnt++]));
+  if (hasRight) MPI_Isend(g[l].Ul + (n-1), 1, colType, right, 1, comm2d, &(reqs[rcnt++]));
+  if (hasUp) MPI_Isend(g[l].Ul, 1, rowType, up, 4, comm2d, &(reqs[rcnt++]));
+  if (hasDown) MPI_Isend(g[l].Ul + n * (n-1), 1, rowType, down, 3, comm2d, &(reqs[rcnt++]));
+
+  for (size_t i = 1; i < n-1; i++)
    for (size_t k = 1; k < n-1; k++){
      int j = i * n + k;
- g[l].Resl[j] =g[l].fl[j] + (g[l].Ul[j - n] + g[l].Ul[j + n] - 4 * g[l].Ul[j] + g[l].Ul[j - 1] + g[l].Ul[j + 1]) * h2;
+     g[l].Resl[j] = g[l].fl[j] + (g[l].Ul[j - n] + g[l].Ul[j + n] + g[l].Ul[j - 1] + g[l].Ul[j + 1] - 4 * g[l].Ul[j]) * h2;
    }
+
+  MPI_Status stats[8];
+  MPI_Waitall(rcnt, reqs, stats);
+
+   //left
+   if (hasLeft)
+   for (int j = n; j < n*n-n; j+= n){
+     g[l].Resl[j] = g[l].fl[j] + (g[l].Ul[j - n] + g[l].Ul[j + n] + g[l].left[j/n] + g[l].Ul[j + 1] - 4 * g[l].Ul[j]) * h2;
+   }
+   //right
+   if (hasRight)
+   for (int j = n-1+n; j < n*n-n; j+= n){
+     g[l].Resl[j] = g[l].fl[j] + (g[l].Ul[j - n] + g[l].Ul[j + n] + g[l].Ul[j - 1] + g[l].right[j/n] - 4 * g[l].Ul[j]) * h2;
+   }
+   //up
+   if (hasUp)
+   for (int j = 1; j < n-1; j++){
+     g[l].Resl[j] = g[l].fl[j] + (g[l].up[j] + g[l].Ul[j + n] + g[l].Ul[j - 1] + g[l].Ul[j + 1] - 4 * g[l].Ul[j]) * h2;
+   }
+   //down
+   if (hasDown)
+     for (int j = n*n-n+1; j < n*n-1; j++){
+     g[l].Resl[j] = g[l].fl[j] + (g[l].Ul[j - n] + g[l].down[j - n*n + n] + g[l].Ul[j - 1] + g[l].Ul[j + 1] - 4 * g[l].Ul[j]) * h2;
+   }
+   if (hasUp && hasRight){
+     int j = n - 1;
+     g[l].Resl[j] = g[l].fl[j] + (g[l].up[n-1] + g[l].Ul[j + n] + g[l].Ul[j - 1] + g[l].right[0] - 4 * g[l].Ul[j]) * h2;
+   }
+   if (hasRight && hasDown){
+     int j = n * n - 1;
+     g[l].Resl[j] = g[l].fl[j] + (g[l].Ul[j - n] + g[l].down[j - n*n + n] + g[l].Ul[j - 1] + g[l].right[n - 1] - 4 * g[l].Ul[j]) * h2;
+   }
+   if (hasDown && hasLeft){
+     int j = n * n - n;
+     g[l].Resl[j] = g[l].fl[j] + (g[l].Ul[j - n] + g[l].down[j - n*n + n] + g[l].left[n-1] + g[l].Ul[j + 1] - 4 * g[l].Ul[j]) * h2;
+   }
+   if (hasLeft && hasUp){
+     int j = 0;
+     g[l].Resl[j] = g[l].fl[j] + (g[l].up[0] + g[l].Ul[j + n] + g[l].left[j/n] + g[l].Ul[j + 1] - 4 * g[l].Ul[j]) * h2;
+   }
+
 
  auto t1 = std::chrono::system_clock::now();
  residualTime[l] += std::chrono::duration<double>(t1-t0).count();

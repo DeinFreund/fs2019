@@ -11,13 +11,14 @@
 #include "heat2d_cpu.hpp"
 #include "string.h"
 #include <chrono>
+#include <iostream>
 
 pointsInfo __p;
 
 int main(int argc, char* argv[])
 {
  double tolerance = 1e-0; // L2 Difference Tolerance before reaching convergence.
- size_t N0 = 10; // 2^N0 + 1 elements per side
+ size_t N0 = 9; // 2^N0 + 1 elements per side
 
  // Multigrid parameters -- Find the best configuration!
  size_t gridCount       = 1;     // Number of Multigrid levels to use
@@ -27,8 +28,21 @@ int main(int argc, char* argv[])
  gridLevel* g = generateInitialConditions(N0, gridCount);
 
  auto startTime = std::chrono::system_clock::now();
- while (g[0].L2NormDiff > tolerance)  // Multigrid solver start
+  while (g[0].L2NormDiff > tolerance)  // Multigrid solver start
+ //for (int b = 0; b < 3; b++)
  {
+   /*
+   std::cout << "Step " << b << std::endl;
+   int n = g[0].N;
+       std::cout << "Matrix "  << std::endl;
+       for (int y = 0; y < n; y++){
+	 for (int x = 0; x < n; x++){
+	   std::cout << g[0].U[x][y] << " ";
+	 }
+	 std::cout << std::endl;
+       }
+   //*/  
+
   applyJacobi(g, 0, downRelaxations); // Relaxing the finest grid first
   calculateResidual(g, 0); // Calculating Initial Residual
 
